@@ -1,0 +1,2 @@
+/home/hy/dkvstore/include/dkvstore/common/status.h:9:12: warning: enum 'ErrorCode' uses a larger base type ('uint16_t' (aka 'unsigned short'), size: 2 bytes) than necessary for its value set, consider using 'std::uint8_t' (1 byte) as the base type to reduce its size [performance-enum-size]
+    9 | enum class ErrorCode : uint16_t {
