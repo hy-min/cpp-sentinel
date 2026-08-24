@@ -18,6 +18,50 @@ from cpp_sentinel.review import build_prompt, parse_response
 ROOT = Path(__file__).resolve().parents[1]
 LABELS = [json.loads(l) for l in (ROOT / "eval" / "dataset" / "labels.jsonl").read_text().splitlines()]
 
+REPO = sys.argv[1] if len(sys.argv) > 1 else "/home/hy/dkvstore"
+CC_FILES = [e["file"] for e in json.loads((Path(REPO) / "build" / "compile_commands.json").read_text())
+            if e["file"].endswith((".cc", ".cpp"))]
+
+def extract_names(header: str) -> list[str]:
+    """v5:用课 2 的 AST 手法,提取 header 里定义的 类/函数/方法名"""
+    import clang.cindex
+    idx = clang.cindex.Index.create()
+    tu = idx.parse(header, args=["-std=c++17", "-I" + str(Path(REPO) / "include"), "-x", "c++"])
+    names = set()
+    kinds = (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CXX_METHOD,
+             clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR)
+    for n in tu.cursor.walk_preorder():
+        if n.kind in kinds:
+            loc = n.location.file
+            # 只要"定义在这个 header 里"的名字——系统库的别收(课2:只留自家园)
+            if n.spelling and loc is not None and str(loc).endswith(Path(header).name) \
+               and "operator" not in n.spelling:
+                names.add(n.spelling.split("<")[0])     # Result<T> → Result
+    return list(names)
+
+USE_ACTIONS = ("Result<", "Result(", "Status(", ".Value(", ".TakeValue(", ".IsOk(", "ErrorCode::")
+
+def usage_side(header: str) -> str:
+    """v5:跨文件抓'真实使用动作行' → '使用侧证据'(不匹配名字,匹配动作)"""
+    if not header.endswith((".h", ".hpp")):
+        return ""
+    out = []
+    for f in CC_FILES:
+        try:
+            lines = Path(f).read_text(errors="ignore").splitlines()
+        except OSError:
+            continue
+        hits = 0
+        for i, ln in enumerate(lines):
+            if any(act in ln for act in USE_ACTIONS):
+                out.append(f"{Path(f).name}:{i+1}: {ln.strip()[:100]}")
+                hits += 1
+                if hits >= 4:
+                    break
+        if len(out) >= 12:
+            break
+    return "\n".join(out)
+
 def arm_static():
     """A 臂:所有告警都判'bug'(静态工具全报,不做鉴别)"""
     return ["bug"] * len(LABELS)                                # 全枪毙=全报
@@ -52,6 +96,9 @@ def llm_judge(use_rag: bool):
             if hit["ids"][0]:
                 ctx.append("相关规范: " + hit["metadatas"][0][0]["title"])
         ctx.append("=== 源码证据 ===\n" + source_snippet(row["file"], row["line"]))
+        usage = usage_side(row["file"])                       # v5:符号层跨文件使用侧
+        if usage:
+            ctx.append("=== 使用侧证据(跨文件) ===\n" + usage)
         ctx = "\n".join(ctx)
         prompt = f"{RUBRIC}\n\n=== 告警 ===\n{alert}\n=== 背景 ===\n{ctx}"
         resp = client.chat.completions.create(
@@ -84,11 +131,11 @@ def main():
     print("\n=== B 臂: +LLM ===")
     preds_b = llm_judge(use_rag=False)
     (ROOT / "eval" / "results").mkdir(exist_ok=True)
-    (ROOT / "eval" / "results" / "arm_llm_v4.jsonl").write_text(json.dumps(preds_b))   # v4(全文窗口)
+    (ROOT / "eval" / "results" / "arm_llm_v5.jsonl").write_text(json.dumps(preds_b))   # v5(使用侧)
     print(compute_metrics(gold, preds_b))
-    print("\n=== C 臂: +LLM+RAG (v4) ===")
+    print("\n=== C 臂: +LLM+RAG (v5) ===")
     preds_c = llm_judge(use_rag=True)
-    (ROOT / "eval" / "results" / "arm_rag_v4.jsonl").write_text(json.dumps(preds_c))
+    (ROOT / "eval" / "results" / "arm_rag_v5.jsonl").write_text(json.dumps(preds_c))
     print(compute_metrics(gold, preds_c))
 
 if __name__ == "__main__":

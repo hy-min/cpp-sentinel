@@ -27,7 +27,8 @@ for name, label in [
     ("arm_llm_v2.jsonl", "B 臂 v2(+强谓词规则)"),
     ("arm_llm_v3.jsonl", "B 臂 v3(+行级源码证据)"),
     ("arm_llm_v4.jsonl", "B 臂 v4(+全文窗口证据)"),
-    ("arm_rag_v4.jsonl", "C 臂 v4(+全文窗口+RAG)"),
+    ("arm_llm_v5.jsonl", "B 臂 v5(+符号层使用侧证据)"),
+    ("arm_rag_v5.jsonl", "C 臂 v5(+使用侧+RAG)"),
 ]:
     preds = load(name)
     if preds is not None:

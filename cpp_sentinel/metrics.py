@@ -9,8 +9,12 @@ def compute_metrics(gold: List[str], pred: List[str]) -> dict:
     - pred 判 "unsure" 算"没判" → 如果 gold 是 bug,记漏(fn);gold 是 noise,不算错
     - gold 本身是 "unsure" 的样本,金标准不明,跳过不计入
     """
+    # 标签对齐层:标注词汇 vs LLM 词汇,先翻译成同一套
+    ALIAS = {"real": "bug", "ignore": "noise", "suspicious": "unsure"}
+
     tp = fp = fn = tn = 0
     for g, p in zip(gold, pred):
+        g, p = ALIAS.get(g, g), ALIAS.get(p, p)
         if g == "unsure":
             continue                             # 金标准不清楚,跳过
         if p == "bug" and g == "bug":
