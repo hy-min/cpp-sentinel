@@ -39,6 +39,64 @@ def extract_names(header: str) -> list[str]:
                 names.add(n.spelling.split("<")[0])     # Result<T> → Result
     return list(names)
 
+# ---------- P2: AST 调用索引(真正的"谁调用了谁",课 2 工厂化) ----------
+_CALL_INDEX = None
+
+
+def build_call_index():
+    """全仓库扫描一遍,建立 {符号名: [(文件,行,所在函数)]} 索引(每进程只建一次)"""
+    global _CALL_INDEX
+    if _CALL_INDEX is not None:
+        return _CALL_INDEX
+    import clang.cindex
+    reader = clang.cindex.Index.create()
+    index = {}
+    for f in CC_FILES:
+        try:
+            tu = reader.parse(f, args=["-std=c++17", "-I" + str(Path(REPO) / "include")])
+        except Exception:
+            continue
+
+        def walk(node, func):
+            for child in node.get_children():
+                f2 = func
+                if child.kind in (clang.cindex.CursorKind.FUNCTION_DECL,
+                                  clang.cindex.CursorKind.CXX_METHOD):
+                    f2 = child.spelling                       # 走入函数体,记住当前函数
+                if child.kind in (clang.cindex.CursorKind.DECL_REF_EXPR,
+                                  clang.cindex.CursorKind.MEMBER_REF_EXPR) and child.spelling:
+                    loc = child.location
+                    if loc.file is not None and str(loc.file).startswith(REPO):
+                        index.setdefault(child.spelling, []).append(
+                            (Path(f).name, loc.line, f2 or ""))
+                walk(child, f2)
+
+        walk(tu.cursor, None)
+    _CALL_INDEX = index
+    return index
+
+
+def ast_callers(header: str) -> str:
+    """P2 使用侧:查 AST 索引,输出该 header 定义的每个符号被谁引用(带调用者)"""
+    if not header.endswith((".h", ".hpp")):
+        return ""
+    names = extract_names(header)
+    index = build_call_index()
+    rows, seen = [], set()
+    for name in names:
+        for f, line, fn in sorted(index.get(name, []), key=lambda x: (x[1])):
+            key = (f, line, fn, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(f"{f}:{line} ({fn}) 引用 {name}")
+            if len(rows) >= 12:
+                break
+        if len(rows) >= 12:
+            break
+    return "\n".join(rows)
+
+
 USE_ACTIONS = ("Result<", "Result(", "Status(", ".Value(", ".TakeValue(", ".IsOk(", "ErrorCode::")
 
 def usage_side(header: str) -> str:
@@ -96,9 +154,9 @@ def llm_judge(use_rag: bool):
             if hit["ids"][0]:
                 ctx.append("相关规范: " + hit["metadatas"][0][0]["title"])
         ctx.append("=== 源码证据 ===\n" + source_snippet(row["file"], row["line"]))
-        usage = usage_side(row["file"])                       # v5:符号层跨文件使用侧
+        usage = ast_callers(row["file"])                      # P2:AST 调用链证据(替代行匹配版)
         if usage:
-            ctx.append("=== 使用侧证据(跨文件) ===\n" + usage)
+            ctx.append("=== 调用链证据(AST 级别) ===\n" + usage)
         ctx = "\n".join(ctx)
         prompt = f"{RUBRIC}\n\n=== 告警 ===\n{alert}\n=== 背景 ===\n{ctx}"
         resp = client.chat.completions.create(
@@ -131,11 +189,11 @@ def main():
     print("\n=== B 臂: +LLM ===")
     preds_b = llm_judge(use_rag=False)
     (ROOT / "eval" / "results").mkdir(exist_ok=True)
-    (ROOT / "eval" / "results" / "arm_llm_v5.jsonl").write_text(json.dumps(preds_b))   # v5(使用侧)
+    (ROOT / "eval" / "results" / "arm_llm_v7.jsonl").write_text(json.dumps(preds_b))   # v7(AST 调用链)
     print(compute_metrics(gold, preds_b))
-    print("\n=== C 臂: +LLM+RAG (v5) ===")
+    print("\n=== C 臂: +LLM+RAG (v7) ===")
     preds_c = llm_judge(use_rag=True)
-    (ROOT / "eval" / "results" / "arm_rag_v5.jsonl").write_text(json.dumps(preds_c))
+    (ROOT / "eval" / "results" / "arm_rag_v7.jsonl").write_text(json.dumps(preds_c))
     print(compute_metrics(gold, preds_c))
 
 if __name__ == "__main__":

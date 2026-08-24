@@ -30,6 +30,8 @@ for name, label in [
     ("arm_llm_v5.jsonl", "B 臂 v5(+符号层使用侧证据)"),
     ("arm_rag_v5.jsonl", "C 臂 v5(+使用侧+RAG 5 条库)"),
     ("arm_rag_v6.jsonl", "C 臂 v6(+使用侧+RAG 50 条库)"),
+    ("arm_llm_v7.jsonl", "B 臂 v7(+AST 调用链证据)"),
+    ("arm_rag_v7.jsonl", "C 臂 v7(+AST 调用链+RAG 50 库)"),
 ]:
     preds = load(name)
     if preds is not None:
