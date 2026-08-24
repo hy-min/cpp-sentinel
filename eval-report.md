@@ -63,6 +63,20 @@
 3. 静态工具本身存在盲区(空指针/越界类注入缺陷零捕获)——分层责任设计的意义;
 4. 负结果如实: RAG(5 条小库)零增益;该增益应在知识库规模与覆盖度上找,而非否定方法。
 
+## 数据文件地图（各仓库独立命名,防止互相覆盖）
+
+数据/结果按仓库分叉存储,`*_<repo>` 后缀标识数据来源:
+
+| 仓库 | 标注 | 告警池 | LLM 三臂结果 |
+|---|---|---|---|
+| dkvstore(主实验,30 条标注) | `labels_dkvstore.jsonl` | `alerts_dkvstore.jsonl`(98 行完整池) | v1-v5 见 `arm_llm*.jsonl` |
+| mini-store(泛化,10 条标注) | `labels_mini.jsonl` | `alerts_mini.jsonl` | `arm_llm_v7_mini.jsonl`/`arm_rag_v7_mini.jsonl` |
+| gr-ieee802-11(真实压测,30 条规则预填) | `labels_gr.jsonl` | `alerts_gr.jsonl` | `arm_llm_v7_gr.jsonl`/`arm_rag_v7_gr.jsonl` |
+
+**主文件语义(当前)**:`alerts.jsonl`/`labels.jsonl` = gr 数据(最后跑的仓库);`arm_llm_v7.jsonl` = gr 结果。
+**教训(2026-08-24)**:早期各仓库复用同一文件名致覆盖——dkvstore 原数据仅存于 git 历史 `a7f43f5`,
+`labels_dkvstore.jsonl` 等分叉文件即本轮恢复产物;后续跑新仓库实验必须按独立名词写入。
+
 ---
 
 *复现:`python eval/run_eval.py && python eval/recompute.py`*

@@ -1,0 +1,10 @@
+{"idx": 0, "file": "/home/hy/mini-store/include/mini/service.h", "line": 9, "check": "performance-enum-size", "message": "enum 'Mode' uses a larger base type ('uint16_t') than necessary", "label": "noise", "note": "省1字节,无正确性影响"}
+{"idx": 1, "file": "/home/hy/mini-store/include/mini/service.h", "line": 15, "check": "bugprone-unchecked-optional-access", "message": "unchecked access to optional value", "label": "bug", "note": "★正样本: Fetch 失败路径 value 空; main 失败分支仍调 Get() → optional::value() 即 UB(使用侧清楚)"}
+{"idx": 2, "file": "/home/hy/mini-store/src/service.cc", "line": 13, "check": "performance-inefficient-vector-operation", "message": "'push_back' is called inside a loop; consider pre-allocating", "label": "noise", "note": "纯性能建议,无正确性影响"}
+{"idx": 3, "file": "/home/hy/mini-store/src/service.cc", "line": 18, "check": "performance-avoid-endl", "message": "do not use 'std::endl'", "label": "noise", "note": "惯例"}
+{"idx": 4, "file": "/home/hy/mini-store/src/main.cc", "line": 7, "check": "bugprone-exception-escape", "message": "an exception may be thrown in function 'main'", "label": "noise", "note": "实际无显式 throw 路径,保守含边界"}
+{"idx": 5, "file": "/home/hy/mini-store/src/main.cc", "line": 8, "check": "bugprone-unused-local-non-trivial-variable", "message": "unused local variable 'key'", "label": "noise", "note": "未使用变量,无运行时影响"}
+{"idx": 6, "file": "/home/hy/mini-store/src/main.cc", "line": 14, "check": "performance-avoid-endl", "message": "do not use 'std::endl'", "label": "noise", "note": "惯例"}
+{"idx": 7, "file": "/home/hy/mini-store/src/main.cc", "line": 16, "check": "performance-avoid-endl", "message": "do not use 'std::endl'", "label": "noise", "note": "惯例"}
+{"idx": 8, "file": "/home/hy/mini-store/src/main.cc", "line": 17, "check": "performance-avoid-endl", "message": "do not use 'std::endl'", "label": "noise", "note": "惯例"}
+{"idx": 9, "file": "/home/hy/mini-store/src/main.cc", "line": 22, "check": "performance-avoid-endl", "message": "do not use 'std::endl'", "label": "noise", "note": "惯例"}
