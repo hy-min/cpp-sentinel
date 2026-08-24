@@ -56,6 +56,10 @@ RUBRIC = """你是 C++ 静态审查助手。针对告警与上下文,判定:
 - real: 证据充分(如:被广泛调用、路径可达、符合 CWE)→ 真问题
 - suspicious: 证据不足,值得人工再看
 - ignore: 误报/风格问题
+=== 强谓词规则(重要) ===
+- 若 check 名含 optional 且 message 描述"未检查访问"(unchecked access),或属 clang-analyzer
+  的内存安全类,或 message 含 accessing/memory/overflow 等词:除非有明确反证,应判 real 或 suspicious,
+  不要判 ignore —— 宁可保守,不可漏检。
 只输出 JSON: {"decision": "...", "reason": "一句话理由", "confidence": 0.x}"""
 
 def main():
@@ -65,11 +69,11 @@ def main():
     print("\n=== B 臂: +LLM ===")
     preds_b = llm_judge(use_rag=False)
     (ROOT / "eval" / "results").mkdir(exist_ok=True)
-    (ROOT / "eval" / "results" / "arm_llm.jsonl").write_text(json.dumps(preds_b))
+    (ROOT / "eval" / "results" / "arm_llm_v2.jsonl").write_text(json.dumps(preds_b))   # v2(强谓词)
     print(compute_metrics(gold, preds_b))
-    print("\n=== C 臂: +LLM+RAG ===")
+    print("\n=== C 臂: +LLM+RAG (v2 规则) ===")
     preds_c = llm_judge(use_rag=True)
-    (ROOT / "eval" / "results" / "arm_rag.jsonl").write_text(json.dumps(preds_c))
+    (ROOT / "eval" / "results" / "arm_rag_v2.jsonl").write_text(json.dumps(preds_c))
     print(compute_metrics(gold, preds_c))
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""用已保存的 LLM 判断 + 最新标注,直接重算三臂(不再烧 API)"""
+"""v1 vs v2 对比:强谓词规则前后,同一道题重测"""
 import json
 import sys
 from pathlib import Path
@@ -9,12 +9,21 @@ from cpp_sentinel.metrics import compute_metrics
 
 ROOT = Path(__file__).resolve().parents[1]
 labels = [json.loads(l) for l in (ROOT / "eval" / "dataset" / "labels.jsonl").read_text().splitlines()]
-gold = [r["label"] for r in labels]                          # 最新金标准(含 P1=bug)
+gold = [r["label"] for r in labels]
 
-static = ["bug"] * len(labels)                               # A 臂:全报
-llm = json.loads((ROOT / "eval" / "results" / "arm_llm.jsonl").read_text())   # B 臂(已存)
-rag = json.loads((ROOT / "eval" / "results" / "arm_rag.jsonl").read_text())   # C 臂(已存)
+def load(name: str):
+    p = ROOT / "eval" / "results" / name
+    return json.loads(p.read_text()) if p.exists() else None
 
-print("=== A 臂:裸静态(全报)==="); print(compute_metrics(gold, static))
-print("=== B 臂:+LLM ===\n"); print(compute_metrics(gold, llm))
-print("=== C 臂:+LLM+RAG ==="); print(compute_metrics(gold, rag))
+static = ["bug"] * len(labels)
+llm_v1 = load("arm_llm.jsonl")          # 旧:无强谓词规则
+llm_v2 = load("arm_llm_v2.jsonl")       # 新:有强谓词规则
+rag_v2 = load("arm_rag_v2.jsonl")
+
+print("=== A 臂(裸静态)==="); print(compute_metrics(gold, static))
+if llm_v1:
+    print("\n=== B 臂 v1(无强谓词)==="); print(compute_metrics(gold, llm_v1))
+if llm_v2:
+    print("\n=== B 臂 v2(强谓词)==="); print(compute_metrics(gold, llm_v2))
+if rag_v2:
+    print("\n=== C 臂 v2(强谓词+RAG)==="); print(compute_metrics(gold, rag_v2))
