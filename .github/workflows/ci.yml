@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:                    # 每次 push 都跑(pytest)
+  workflow_dispatch:       # 手动触发(eval,花钱的活,按需)
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4                       # 把仓库装进 runner
+      - uses: conda-incubator/setup-miniconda@v3        # 官方 conda 环境工具
+        with:
+          python-version: "3.11"
+          channels: conda-forge
+      - name: Install deps
+        run: |
+          python -m pip install -r requirements.txt      # 锁死的依赖(课10)
+      - name: Run pytest (确定性单测,不打 LLM)
+        run: |
+          python -m pytest tests/ -q                    # 16 项全绿才放行
+
+  eval:                      # 手动触发的实验车间
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: "3.11"
+          channels: conda-forge
+      - name: Install deps
+        run: python -m pip install -r requirements.txt
+      - name: Run eval (needs DEEPSEEK_API_KEY secret)
+        run: python eval/recompute.py
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
