@@ -1,16 +1,19 @@
 FROM condaforge/miniforge3:latest
 WORKDIR /app
-COPY requirements.txt .
 
-# 三件套同版(22.1.8)+ python deps —— 与本地/CI 完全一致
-# 注意:容器内 Linux 网络(可能)无代理,conda/pip 走国内镜像
-RUN conda create -n cpp-review python=3.11 clang-tools=22.1.8 clang=22.1.8 clangxx=22.1.8 \
-      -c https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge -y \
- && /opt/conda/envs/cpp-review/bin/python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+# 搬运式构建:cpp-review 环境已在本地打包好(conda pack),
+# 避免构建机网络不稳定(IncompleteRead 断流已实测 6 次)。
+COPY cppenv.tar.gz .
+RUN mkdir -p /opt/conda/envs/cpp-review \
+ && tar -xzf cppenv.tar.gz -C /opt/conda/envs/cpp-review
 
 COPY . .
 
-# 运行示例:
-#   docker build -t cpp-sentinel .
-#   docker run --rm cpp-sentinel python -m cpp_sentinel.cli
+# 预热:让模型真正"干一次活"触发下载(构造不算!);代理仅构建时临时生效(--network host),
+# 不写入镜像,运行容器不再需要网络
+RUN HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 \
+    /opt/conda/envs/cpp-review/bin/python -c \
+    "from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2; ONNXMiniLM_L6_V2().embed_query('preheat')"
+
+# 更新方式:把本地 cppenv.tar.gz 重新生成后 build 即可
 CMD ["/opt/conda/envs/cpp-review/bin/python", "-m", "cpp_sentinel.cli"]
