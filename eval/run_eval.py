@@ -22,6 +22,16 @@ def arm_static():
     """A 臂:所有告警都判'bug'(静态工具全报,不做鉴别)"""
     return ["bug"] * len(LABELS)                                # 全枪毙=全报
 
+def source_snippet(file: str, line: int, span: int = 4) -> str:
+    """v3:读取告警行 ±4 行的源码,当'证据切片'给 LLM 看"""
+    p = Path(file)
+    if not p.exists():
+        return "(源文件不可读)"
+    lines = p.read_text(errors="ignore").splitlines()
+    lo, hi = max(0, line - span), min(len(lines), line + span)
+    return "\n".join(f"{i+1}: {lines[i]}" for i in range(lo, hi))
+
+
 def llm_judge(use_rag: bool):
     """B/C 臂:LLM 逐条判;use_rag 控制是否附带知识库条款"""
     if not os.environ.get("DEEPSEEK_API_KEY"):
@@ -31,13 +41,16 @@ def llm_judge(use_rag: bool):
     preds = []
     for row in LABELS:
         alert = (f"{row['file']}:{row['line']}: {row['check']}\n{row['message']}")
-        ctx = ""
+        ctx = []
         if use_rag:                                             # C 臂多一步:查知识库
             import chromadb
             chroma = chromadb.PersistentClient(path=str(Path("/home/hy/dkvstore") / "data" / "chroma"))
             col = chroma.get_or_create_collection("cwe")
             hit = col.query(query_texts=[row["message"]], n_results=1)
-            ctx = "相关规范: " + hit["metadatas"][0][0]["title"] if hit["ids"][0] else ""
+            if hit["ids"][0]:
+                ctx.append("相关规范: " + hit["metadatas"][0][0]["title"])
+        ctx.append("=== 源码证据 ===\n" + source_snippet(row["file"], row["line"]))
+        ctx = "\n".join(ctx)
         prompt = f"{RUBRIC}\n\n=== 告警 ===\n{alert}\n=== 背景 ===\n{ctx}"
         resp = client.chat.completions.create(
             model="deepseek-chat",
@@ -69,11 +82,11 @@ def main():
     print("\n=== B 臂: +LLM ===")
     preds_b = llm_judge(use_rag=False)
     (ROOT / "eval" / "results").mkdir(exist_ok=True)
-    (ROOT / "eval" / "results" / "arm_llm_v2.jsonl").write_text(json.dumps(preds_b))   # v2(强谓词)
+    (ROOT / "eval" / "results" / "arm_llm_v3.jsonl").write_text(json.dumps(preds_b))   # v3(源码证据)
     print(compute_metrics(gold, preds_b))
-    print("\n=== C 臂: +LLM+RAG (v2 规则) ===")
+    print("\n=== C 臂: +LLM+RAG (v3 规则) ===")
     preds_c = llm_judge(use_rag=True)
-    (ROOT / "eval" / "results" / "arm_rag_v2.jsonl").write_text(json.dumps(preds_c))
+    (ROOT / "eval" / "results" / "arm_rag_v3.jsonl").write_text(json.dumps(preds_c))
     print(compute_metrics(gold, preds_c))
 
 if __name__ == "__main__":

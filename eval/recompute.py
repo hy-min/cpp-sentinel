@@ -1,4 +1,4 @@
-"""v1 vs v2 对比:强谓词规则前后,同一道题重测"""
+"""v1/v2/v3 全版本对比:同一道题,三次迭代,一表看尽"""
 import json
 import sys
 from pathlib import Path
@@ -15,15 +15,20 @@ def load(name: str):
     p = ROOT / "eval" / "results" / name
     return json.loads(p.read_text()) if p.exists() else None
 
-static = ["bug"] * len(labels)
-llm_v1 = load("arm_llm.jsonl")          # 旧:无强谓词规则
-llm_v2 = load("arm_llm_v2.jsonl")       # 新:有强谓词规则
-rag_v2 = load("arm_rag_v2.jsonl")
+versions = [
+    ("A 臂(裸静态)", None, ["bug"] * len(labels) or None),   # 处理 null
+]
+# A 臂直接用假预测
+print("=== A 臂(裸静态)===")
+print(compute_metrics(gold, ["bug"] * len(labels)))
 
-print("=== A 臂(裸静态)==="); print(compute_metrics(gold, static))
-if llm_v1:
-    print("\n=== B 臂 v1(无强谓词)==="); print(compute_metrics(gold, llm_v1))
-if llm_v2:
-    print("\n=== B 臂 v2(强谓词)==="); print(compute_metrics(gold, llm_v2))
-if rag_v2:
-    print("\n=== C 臂 v2(强谓词+RAG)==="); print(compute_metrics(gold, rag_v2))
+for name, label in [
+    ("arm_llm.jsonl", "B 臂 v1(无证据无规则)"),
+    ("arm_llm_v2.jsonl", "B 臂 v2(+强谓词规则)"),
+    ("arm_llm_v3.jsonl", "B 臂 v3(+源码证据)"),
+    ("arm_rag_v3.jsonl", "C 臂 v3(+源码证据+RAG)"),
+]:
+    preds = load(name)
+    if preds is not None:
+        print(f"\n=== {label} ===")
+        print(compute_metrics(gold, preds))
