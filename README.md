@@ -1,5 +1,7 @@
 # cpp-sentinel
 
+[![CI](https://github.com/hy-min/cpp-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/hy-min/cpp-sentinel/actions/workflows/ci.yml)
+
 静态优先、LLM 去噪的 C++ 代码审查 Agent:
 clang-tidy 扫出告警 → 结构化 → 符号层背景(谁调用谁) → 知识库检索 → LLM 逐条判定 → 报告。
 
