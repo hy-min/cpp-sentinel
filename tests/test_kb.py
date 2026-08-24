@@ -1,8 +1,13 @@
-import chromadb                              # ① 还是这个开箱工具
+"""自包含:不用本地 data/chroma,自己建临时库——任何机器(含 CI)都能过"""
+import chromadb
 
-def test_query_hits_cwe476():
-    client = chromadb.PersistentClient(path="data/chroma")   # ② 打开同一个箱子(数据在)
-    col = client.get_or_create_collection("cwe")             # ③ 找到"cwe"集合
-    result = col.query(query_texts=["空指针导致程序崩溃"], n_results=1)   # ④ 同一个检索动作
-    title = result["metadatas"][0][0]["title"]               # ⑤ 取出命中的 title
-    assert "CWE-476" in title                                # ⑥ 断言:命中 CWE-476
+
+def test_query_hits_cwe476(tmp_path):
+    client = chromadb.PersistentClient(path=str(tmp_path))     # 临时库,pytest 自动清理
+    col = client.get_or_create_collection("cwe")
+    col.upsert(
+        ids=["1"],
+        documents=["CWE-476 空指针解引用：解引用空指针访问内存，导致崩溃"],
+    )
+    res = col.query(query_texts=["空指针导致程序崩溃"], n_results=1)
+    assert "CWE-476" in res["documents"][0][0]                # 命中的文档包含编号
