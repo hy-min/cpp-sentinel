@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cpp-sentinel": {
+      "command": "/home/hy/conda/envs/cpp-review/bin/python",
+      "args": ["-m", "cpp_sentinel.mcp_server"],
+      "cwd": "/home/hy/cpp-sentinel"
+    }
+  }
+}
