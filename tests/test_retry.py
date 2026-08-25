@@ -85,6 +85,45 @@ def test_judge_one_degrades_to_error(monkeypatch):
     client = MagicMock()
     client.chat.completions.create.side_effect = [_status_error(401)]
     r = cli.judge_one(client, Alert(file="x.h", line=1, col=1, severity="warning",
-                                    check_name="c", message="m"), "/tmp/nope")
+                                    check_name="c", message="m"), "/tmp/nope", {})
     assert r.judgement is None
     assert "APIStatusError" in r.error
+
+
+def _msg(text: str) -> MagicMock:
+    """伪造一次"回话":内容必须是合法 JSON(parse_response 要解析它)。"""
+    m = MagicMock()
+    m.choices = [MagicMock(message=MagicMock(content=text))]
+    m.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+    return m
+
+
+def _alert() -> Alert:
+    return Alert(file="x.h", line=1, col=1, severity="warning",
+                 check_name="c", message="m")
+
+
+def test_high_confidence_skips_second_pass(monkeypatch):
+    """高置信度(≥0.8)→ 一票定案,不触发二次判定(省钱验证)。"""
+    monkeypatch.setattr(cli, "build_context", lambda alert, repo: "")
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        _msg('{"decision": "ignore", "reason": "r", "confidence": 0.9}')]
+    r = cli.judge_one(client, _alert(), "/tmp/nope", {})
+    assert client.chat.completions.create.call_count == 1       # 只判一次
+    assert r.passes == 1
+    assert r.judgement.decision == "ignore"
+
+
+def test_low_confidence_triggers_second_pass(monkeypatch):
+    """低置信度(<0.8)→ 带使用侧证据重判一次,二次判定为准。"""
+    monkeypatch.setattr(cli, "build_context", lambda alert, repo: "")
+    monkeypatch.setattr(cli, "names_defined_in", lambda path, repo: {"Get"})   # 嫌疑名单
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        _msg('{"decision": "suspicious", "reason": "ev", "confidence": 0.6}'),
+        _msg('{"decision": "real", "reason": "use-side", "confidence": 0.95}')]
+    r = cli.judge_one(client, _alert(), "/tmp/nope", {"Get": ["main.cc:17"]})
+    assert client.chat.completions.create.call_count == 2       # 触发二判
+    assert r.passes == 2
+    assert r.judgement.decision == "real"                        # 二次判定为准

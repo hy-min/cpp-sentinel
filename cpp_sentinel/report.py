@@ -17,6 +17,7 @@ class ReviewResult:                       # ① 把"告警 + 判断"捆在一起
     judgement: Classification | None = None    # 判定成功才有;失败时是 None
     error: str | None = None                   # 失败时的人话原因
     usage: dict | None = None                  # 本判定消耗的 token 账单(API 明账)
+    passes: int = 1                            # 判定了几次(2 = 走了一次二次判定)
 
 
 def make_report(results: List[ReviewResult]) -> dict:
@@ -35,6 +36,7 @@ def make_report(results: List[ReviewResult]) -> dict:
                      key=lambda r: r.judgement.confidence, reverse=True)
     pt = sum(r.usage["prompt_tokens"] for r in results if r.usage)          # ④ 账单主线程汇总
     ct = sum(r.usage["completion_tokens"] for r in results if r.usage)
+    second_pass = sum(1 for r in results if r.passes == 2)                  # ⑤ 走二判的条目数
     return {
         "total": len(results),
         "summary": counts,                                       # ④ 四态统计
@@ -50,6 +52,7 @@ def make_report(results: List[ReviewResult]) -> dict:
         ],
         "failed": failed,                                        # ⑥ 失败明细:诚实挂账
         "usage": {"prompt_tokens": pt, "completion_tokens": ct},  # ⑦ 账单汇总(顶层,不混进判定)
+        "second_pass": second_pass,                               # ⑧ 二判条目数(可观测性)
     }
 
 
@@ -58,7 +61,8 @@ def to_markdown(report: dict) -> str:
     lines = [
         "# 代码审查报告\n",
         f"共 {report['total']} 条告警 — "
-        f"真问题 {s['real']} / 疑似 {s['suspicious']} / 忽略 {s['ignore']} / 失败 {s['failed']}\n",
+        f"真问题 {s['real']} / 疑似 {s['suspicious']} / 忽略 {s['ignore']} / 失败 {s['failed']}"
+        f"(其中 {report['second_pass']} 条经二次判定)\n",
     ]
     for e in report["entries"]:
         lines.append(

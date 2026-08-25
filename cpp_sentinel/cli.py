@@ -20,10 +20,13 @@ for v in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
 import openai                          # 异常类用 openai.XXX 前缀引用(与下行的 from 并存,不冲突)
 from openai import OpenAI
 
+from cpp_sentinel.callers import build_call_index, names_defined_in
 from cpp_sentinel.models import Alert
 from cpp_sentinel.parser import parse_alert                 # ★ 漏了这台"剪刀"(课1)
 from cpp_sentinel.review import Classification, build_prompt, parse_response
 from cpp_sentinel.report import ReviewResult, dump_all, make_report, to_markdown
+
+SECOND_PASS_THRESHOLD = 0.8        # 信任线:低于它就"疑而不决 → 去查证"
 
 TIDY_ARGS = ["--checks=bugprone-*,performance-*,clang-analyzer-*"]
 
@@ -123,14 +126,45 @@ def build_context(alert: Alert, repo: str) -> str:
     return "; ".join(ctx)
 
 
-def judge_one(client, alert: Alert, repo: str) -> ReviewResult:
-    """单条判定:临时故障由 call_with_retry 重试;彻底失败降级为 error,不崩。"""
+def _merge_usage(u1: dict, u2: dict) -> dict:
+    """两笔账单合并(两次判定 → 一条记录)。"""
+    return {"prompt_tokens": u1["prompt_tokens"] + u2["prompt_tokens"],
+            "completion_tokens": u1["completion_tokens"] + u2["completion_tokens"]}
+
+
+def gather_evidence(alert: Alert, repo: str, index: dict[str, list[str]]) -> list[str]:
+    """嫌疑名单(告警文件里定义的名字) ∩ 全库调用索引 = 使用侧证据。"""
+    try:
+        suspects = names_defined_in(Path(alert.file), repo)
+    except Exception as e:                       # 宽网兜底:不崩,但必须出声(否则错误不可见)
+        print(f"      (使用侧证据跳过: {e})")
+        return []
+    evidence = []
+    for s in suspects:
+        evidence.extend(index.get(s, []))
+    return evidence[:6]                                 # 最多 6 条,撑爆 prompt 就是灾难
+
+
+def judge_one(client, alert: Alert, repo: str, index: dict[str, list[str]]) -> ReviewResult:
+    """单条判定:低置信度 → 带使用侧证据自动重判一次(最多一次,防死循环)。"""
     try:
         context = build_context(alert, repo)
-        text, _, usage = call_with_retry(client,
-                                         [{"role": "user", "content": build_prompt(alert, context)}])
-        return ReviewResult(alert=alert, judgement=parse_response(text), usage=usage)
-    except Exception as e:                               # 兜底:任何意外都降级,绝不崩
+        msg = [{"role": "user", "content": build_prompt(alert, context)}]
+        text, _, usage = call_with_retry(client, msg)
+        first = parse_response(text)
+        if first.confidence >= SECOND_PASS_THRESHOLD:                # ① 高置信:一票定案
+            return ReviewResult(alert=alert, judgement=first, usage=usage)
+        evidence = gather_evidence(alert, repo, index)               # ② 敢不信:去查"谁在用"
+        if not evidence:                                             # 查无证据:维持原判(诚实)
+            return ReviewResult(alert=alert, judgement=first, usage=usage)
+        prompt2 = build_prompt(alert, context) + (
+            "\n=== 使用侧证据(这些地方调用了告警符号) ===\n" +
+            "\n".join(evidence) +
+            "\n注意:第一次判定因证据不足存疑;以上是调用点,若调用点在失败路径,应改判 real。")
+        text2, _, usage2 = call_with_retry(client, [{"role": "user", "content": prompt2}])
+        return ReviewResult(alert=alert, judgement=parse_response(text2),
+                            usage=_merge_usage(usage, usage2), passes=2)     # ③ 二次判定为准
+    except Exception as e:                                               # 兜底:任何意外都降级,绝不崩
         return ReviewResult(alert=alert, error=f"{type(e).__name__}: {e}")
 
 
@@ -142,9 +176,11 @@ def classify_all(alerts: list[Alert], repo: str, limit: int = 3, workers: int = 
                     api_key=os.environ["DEEPSEEK_API_KEY"])
 
     t0 = time.perf_counter()                            # ② 计时器(秒表,比 time.time 更准)
+    index = build_call_index(repo)                      # 只用一次:全库"谁在调用"索引(共享只读)
+    print(f"      使用侧索引 {len(index)} 个函数")
     results = []
     with ThreadPoolExecutor(max_workers=workers) as pool:        # ③ 开 workers 个窗口
-        futures = {pool.submit(judge_one, client, a, repo): i
+        futures = {pool.submit(judge_one, client, a, repo, index): i
                    for i, a in enumerate(alerts[:limit])}
         for fut in as_completed(futures):               # ④ 挤到窗口的饭菜先上桌
             results.append((futures[fut], fut.result()))  # ⑤ (原来的第几号, 结果) 放一起
