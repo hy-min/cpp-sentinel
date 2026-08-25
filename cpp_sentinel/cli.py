@@ -8,6 +8,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # ── R1 铁律:任何 LLM 库 import 之前清代理(见仓库 rules/environment.md)──
@@ -15,14 +17,44 @@ for v in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
           "http_proxy", "https_proxy", "all_proxy"]:
     os.environ.pop(v, None)
 
+import openai                          # 异常类用 openai.XXX 前缀引用(与下行的 from 并存,不冲突)
 from openai import OpenAI
 
 from cpp_sentinel.models import Alert
 from cpp_sentinel.parser import parse_alert                 # ★ 漏了这台"剪刀"(课1)
-from cpp_sentinel.review import Classification, parse_response
+from cpp_sentinel.review import Classification, build_prompt, parse_response
 from cpp_sentinel.report import ReviewResult, dump_all, make_report, to_markdown
 
 TIDY_ARGS = ["--checks=bugprone-*,performance-*,clang-analyzer-*"]
+
+RETRYABLE = {429, 500, 502, 503, 504}      # 服务器"临时不舒服"的错误码
+
+
+def call_with_retry(client, messages: list, max_tries: int = 2,
+                    backoff: float = 0.4) -> tuple[str, int, dict]:
+    """调 LLM:临时故障最多重试(max_tries 次);返回 (文本, 尝试次数, token 账单);永久失败立刻抛出。"""
+    last_err = None
+    for attempt in range(1, max_tries + 1):
+        try:
+            resp = client.chat.completions.create(
+                model="deepseek-chat", messages=messages, temperature=0)
+            # ✅ 成功:带着用了几次 + 账单一起回去(usage 是 API 明账,不自己数)
+            return (resp.choices[0].message.content, attempt,
+                    {"prompt_tokens": resp.usage.prompt_tokens,
+                     "completion_tokens": resp.usage.completion_tokens})
+        except openai.APIConnectionError as e:                    # 网络断了——临时,值得重试
+            last_err = e
+        except openai.APITimeoutError as e:                       # 超时——临时,值得重试
+            last_err = e
+        except openai.APIStatusError as e:                        # 服务端回了(带状态码的)
+            if e.status_code in RETRYABLE:
+                last_err = e                                      # 429/5xx——临时,重试
+            else:
+                raise                                             # 401/402/400——永久,立刻放弃!
+        if attempt < max_tries:
+            print(f"      ⚠ 第 {attempt} 次失败({type(last_err).__name__}),{backoff:.1f}s 后重试 ...")
+            time.sleep(backoff)                                   # 喘口气再试(别瞬时打爆服务器)
+    raise last_err                                                # 试尽仍失败:如实上抛(降级是下一步)
 
 
 def get_alert_lines(repo: str) -> list[str]:
@@ -30,7 +62,7 @@ def get_alert_lines(repo: str) -> list[str]:
     db = Path(repo) / "build" / "compile_commands.json"
     if not db.exists():
         raise SystemExit(f"找不到编译数据库 {db} —— 先: cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
-    files = [e["file"] for e in json.loads(db.read_text())][:3]     # 演示取前 3 个源文件
+    files = [e["file"] for e in json.loads(db.read_text())]        # 全部源文件(解除演示 [:3])
     lines = []
     for f in files:
         r = subprocess.run(["clang-tidy", "-p", str(Path(repo) / "build"), f, *TIDY_ARGS],
@@ -40,13 +72,18 @@ def get_alert_lines(repo: str) -> list[str]:
 
 
 def parse_alerts(lines: list[str]) -> list[Alert]:
-    """② 翻译:只留能解析成 Alert 的行(其余噪音跳过)。"""
+    """② 翻译:只留能解析成 Alert 的行;同一条告警在多个编译单元重复出现,按三元组去重。"""
+    seen = set()                                        # 记"见过的三元组"的桶(集合)
     alerts = []
     for line in lines:
         try:
-            alerts.append(parse_alert(line))           # 课1 的"剪刀+校验"
+            a = parse_alert(line)                       # 课1 的"剪刀+校验"
         except ValueError:
-            pass                                        # 摘要行/统计行,不是告警正文
+            continue                                    # 摘要行/统计行,不是告警正文
+        if (a.file, a.line, a.check_name) in seen:      # ① 文件+行+检查名 = 告警身份证
+            continue                                    # ② 重复的:白判了,跳过(省钱!)
+        seen.add((a.file, a.line, a.check_name))
+        alerts.append(a)
     return alerts
 
 
@@ -86,38 +123,54 @@ def build_context(alert: Alert, repo: str) -> str:
     return "; ".join(ctx)
 
 
-def classify_all(alerts: list[Alert], repo: str, limit: int = 3) -> list[ReviewResult]:
-    """⑤ LLM 判断:每两条补背景,交 DeepSeek,回填判断。"""
+def judge_one(client, alert: Alert, repo: str) -> ReviewResult:
+    """单条判定:临时故障由 call_with_retry 重试;彻底失败降级为 error,不崩。"""
+    try:
+        context = build_context(alert, repo)
+        text, _, usage = call_with_retry(client,
+                                         [{"role": "user", "content": build_prompt(alert, context)}])
+        return ReviewResult(alert=alert, judgement=parse_response(text), usage=usage)
+    except Exception as e:                               # 兜底:任何意外都降级,绝不崩
+        return ReviewResult(alert=alert, error=f"{type(e).__name__}: {e}")
+
+
+def classify_all(alerts: list[Alert], repo: str, limit: int = 3, workers: int = 4) -> list[ReviewResult]:
+    """⑤ LLM 判断:并发(workers 个"打饭窗口")补背景、交 DeepSeek,按原顺序回填。"""
     if not os.environ.get("DEEPSEEK_API_KEY"):
         raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
     client = OpenAI(base_url="https://api.deepseek.com/v1",
                     api_key=os.environ["DEEPSEEK_API_KEY"])
-    from cpp_sentinel.review import build_prompt
+
+    t0 = time.perf_counter()                            # ② 计时器(秒表,比 time.time 更准)
     results = []
-    for alert in alerts[:limit]:
-        context = build_context(alert, repo)
-        resp = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": build_prompt(alert, context)}],
-            temperature=0)
-        judgement = parse_response(resp.choices[0].message.content)
-        results.append(ReviewResult(alert=alert, judgement=judgement))
-    return results
+    with ThreadPoolExecutor(max_workers=workers) as pool:        # ③ 开 workers 个窗口
+        futures = {pool.submit(judge_one, client, a, repo): i
+                   for i, a in enumerate(alerts[:limit])}
+        for fut in as_completed(futures):               # ④ 挤到窗口的饭菜先上桌
+            results.append((futures[fut], fut.result()))  # ⑤ (原来的第几号, 结果) 放一起
+    results.sort(key=lambda x: x[0])                    # ⑥ 按号排回原顺序
+    print(f"      ⏱ 并发 {workers} 路, {len(results)} 条判定, 用时 {time.perf_counter() - t0:.1f}s")
+    return [r for _, r in results]
 
 
-def run(repo: str = "/home/hy/dkvstore", limit: int = 3) -> list[ReviewResult]:
+def run(repo: str = "/home/hy/dkvstore", limit: int = 3, workers: int = 4) -> list[ReviewResult]:
     """合龙:①→⑤ 串起来。"""
     lines = get_alert_lines(repo)
     alerts = parse_alerts(lines)
-    print(f"clang-tidy 扫到 {len(alerts)} 条告警, LLM 判断前 {limit} 条 ...")
-    return classify_all(alerts, repo, limit)
+    print(f"clang-tidy 扫到 {len(alerts)} 条告警, LLM 判断前 {limit} 条 (workers={workers}) ...")
+    return classify_all(alerts, repo, limit, workers=workers)
 
 
 def main():
-    repo = sys.argv[1] if len(sys.argv) > 1 else "/home/hy/dkvstore"
-    results = run(repo)
+    import argparse
+    ap = argparse.ArgumentParser(description="cpp_sentinel CLI")
+    ap.add_argument("repo", nargs="?", default="/home/hy/dkvstore")
+    ap.add_argument("--limit", type=int, default=3)
+    ap.add_argument("--workers", type=int, default=4)   # 1 = 串行(单窗口), 4 = 并发
+    args = ap.parse_args()
+    results = run(args.repo, args.limit, workers=args.workers)
     report = make_report(results)
-    out_dir = Path(repo) / "out"
+    out_dir = Path(args.repo) / "out"
     out_dir.mkdir(exist_ok=True)
     dump_all(results, path=str(out_dir / "report.json"))
     (out_dir / "report.md").write_text(to_markdown(report))

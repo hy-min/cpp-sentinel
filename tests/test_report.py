@@ -15,7 +15,19 @@ def r(decision: str, conf: float) -> ReviewResult:
 def test_make_report_counts_summary():
     rep = make_report([r("real", 0.9), r("suspicious", 0.6), r("ignore", 0.3)])
     assert rep["total"] == 3
-    assert rep["summary"] == {"real": 1, "suspicious": 1, "ignore": 1}
+    assert rep["summary"] == {"real": 1, "suspicious": 1, "ignore": 1, "failed": 0}
+
+
+def test_make_report_counts_failed_and_marks_down():
+    """降级项:summary failed 计 1,失败明细挂账,markdown 显示"未能判定"。"""
+    bad = ReviewResult(
+        alert=Alert(file="x.cc", line=7, col=1, severity="warning",
+                    check_name="c", message="m"),
+        error="APIStatusError: 402")
+    rep = make_report([bad])
+    assert rep["summary"]["failed"] == 1
+    assert rep["failed"][0]["file"].endswith("x.cc")
+    assert "未能判定" in to_markdown(rep)
 
 
 def test_make_report_sorted_by_confidence():
