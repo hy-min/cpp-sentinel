@@ -87,11 +87,13 @@ def main():
     # ② 解析 + 只保留指向用例文件自身的告警(丢弃 testcasesupport/系统头里的)
     file_set = {f for f in files}
     seen, alerts = set(), []
+    n_parse_fail = 0                                 # 对账:正则吃不下的行必须可数(P4-2 教训)
     for f, lines in zip(files, all_lines):
         for ln in lines:
             try:
                 a = parse_alert(ln)
             except ValueError:
+                n_parse_fail += 1
                 continue
             ap = Path(a.file)
             if not ap.is_absolute():
@@ -103,7 +105,8 @@ def main():
                 continue
             seen.add(key)
             alerts.append(a)
-    print(f"解析得告警 {len(alerts)} 条(已去重、已限本文件)")
+    print(f"解析得告警 {len(alerts)} 条(已去重、已限本文件;正则丢弃 {n_parse_fail} 行)")
+    print("check 前缀分布:", dict(Counter(a.check_name.split('-')[0] for a in alerts)))
 
     # ③ 行级真值标签(修 P4-1 口径事故:函数级位置标签把 bad() 内的风格告警也算 bug,
     #    与 LLM 语义判定系统性冲突 → B 臂召回假性 0.17):
