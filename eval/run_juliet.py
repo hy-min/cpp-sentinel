@@ -47,6 +47,16 @@ RUBRIC = """你是 C++ 静态审查助手。针对告警与上下文,判定:
   不要判 ignore —— 宁可保守,不可漏检。
 只输出 JSON: {"decision": "...", "reason": "一句话理由", "confidence": 0.x}"""
 
+# v2(2026-08-26): 治 fn 归因发现的两个模式——"测试用例豁免"心理 + check 语义错位限缩。
+# 单变量对照:同子集、同模型,只换 rubric。
+RUBRIC_V2 = RUBRIC.replace(
+    '只输出 JSON',
+    """=== 判定对象校准(重要) ===
+- 判定对象是告警指向代码路径的**实际后果**:自包含/演示/测试用例中的缺陷也是缺陷,
+  不得因"这是测试代码"豁免;无外部调用证据不等于无缺陷,以文件内数据流为准。
+- 若告警的 check 语义与该行的实际风险不一致,以代码路径的实际后果为准。
+只输出 JSON""")
+
 
 def source_snippet(file: str, line: int, span: int = 25) -> str:
     """与 run_eval.py 同款:短文件全文,长文件 ±span 行窗口。"""
@@ -86,7 +96,7 @@ def rag_context(message: str) -> str:
     return ""
 
 
-def judge_one(client, row: dict, use_rag: bool) -> dict:
+def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC) -> dict:
     """单条判定:源码证据(±RAG)→ LLM;乱答/异常如实记 unsure,不崩。"""
     alert = f"{row['file']}:{row['line']}: {row['check']}\n{row['message']}"
     ctx = []
@@ -95,7 +105,7 @@ def judge_one(client, row: dict, use_rag: bool) -> dict:
         if r:
             ctx.append(r)
     ctx.append("=== 源码证据 ===\n" + source_snippet(row["file"], row["line"]))
-    prompt = f"{RUBRIC}\n\n=== 告警 ===\n{alert}\n=== 背景 ===\n" + "\n".join(ctx)
+    prompt = f"{rubric}\n\n=== 告警 ===\n{alert}\n=== 背景 ===\n" + "\n".join(ctx)
     try:
         text, tries, usage = call_with_retry(client, [{"role": "user", "content": prompt}])
         c = parse_response(text)
@@ -106,11 +116,11 @@ def judge_one(client, row: dict, use_rag: bool) -> dict:
                 "reason": f"{type(e).__name__}: {e}", "usage": {}}
 
 
-def run_arm(client, name: str, use_rag: bool) -> list[dict]:
+def run_arm(client, name: str, use_rag: bool, rubric: str = RUBRIC) -> list[dict]:
     t0 = time.perf_counter()
     out = []
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        futs = {pool.submit(judge_one, client, r, use_rag): i for i, r in enumerate(LABELS)}
+        futs = {pool.submit(judge_one, client, r, use_rag, rubric): i for i, r in enumerate(LABELS)}
         for fut in as_completed(futs):
             out.append((futs[fut], fut.result()))
             print(f"  {name}: {len(out)}/{len(LABELS)}", end="\r")
@@ -152,7 +162,7 @@ def main():
         print(compute_metrics(gold, ["bug"] * len(LABELS)))
 
     client = None
-    if arm in ("B", "C", "all"):
+    if arm in ("B", "C", "all", "v2"):
         if not os.environ.get("DEEPSEEK_API_KEY"):
             raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
         client = OpenAI(base_url="https://api.deepseek.com/v1",
@@ -168,6 +178,15 @@ def main():
         print("=== C 臂: +LLM+RAG ===")
         rows_c = run_arm(client, "llm_rag", use_rag=True)
         print(compute_metrics(gold, [r["decision"] for r in rows_c]))
+
+    if arm == "v2":
+        # 单变量对照:同子集同模型,只换 RUBRIC_V2(治"测试用例豁免"+check 语义错位)
+        print("=== B 臂 v2 rubric 对照 ===")
+        rows_b2 = run_arm(client, "llm_v2", use_rag=False, rubric=RUBRIC_V2)
+        print(compute_metrics(gold, [r["decision"] for r in rows_b2]))
+        print("=== C 臂 v2 rubric 对照 ===")
+        rows_c2 = run_arm(client, "llm_rag_v2", use_rag=True, rubric=RUBRIC_V2)
+        print(compute_metrics(gold, [r["decision"] for r in rows_c2]))
 
 
 if __name__ == "__main__":
