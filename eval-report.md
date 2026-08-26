@@ -81,3 +81,41 @@
 
 *复现:`python eval/run_eval.py && python eval/recompute.py`*
 *模型: DeepSeek-chat;Tools: clang-tidy 22.1.8(clang 22.1.8);libclang 18.1.1(备注:版本差) *
+
+---
+
+## P4 Juliet 规模化基准(2026-08-26)
+
+**动机**:dkvstore 头条指标的 n=1 软肋(30 告警 1 真阳)。上 NIST Juliet C/C++ 1.3 规模化。
+
+**基准构造**(`eval/prepare_juliet.py`,seed=42):
+- 4 CWE × 3426 用例(476 空指针/401 内存泄漏/369 除零/415 双重释放),与 dkvstore 同款检查组;
+- 全量告警池 3379 → 剔除 clang-diagnostic-* 编译器病啸 249 → **3130 条**,真实噪声占比 89–99%
+  (去噪价值在规模上成立,不再依赖 dkvstore 单点);
+- 真值口径(行级):bad 函数体内 ∧ 告警行距 Juliet 官方 `/* FLAW */` 注释 ≤4 行;
+- 判定子集 357 条(bug=117 / noise=240,分层采样)。
+
+**P4-1 口径事故(方法论发现)**:第一版用函数级位置标签(bad() 内告警都算 bug),
+把 DeadStores 等风格告警错标为 bug,与 LLM 语义判定系统性冲突,B 臂召回假性 0.17。
+修正为行级口径。**教训:真值粒度必须与判定语义同层**——与"分母同域"同构。
+
+**A 臂(判定子集,n=357)**:裸静态全报 P=0.328 / R=1.0 / F1=0.494——
+"静态告警约 1/3 为真"在规模化标注下复现(dkvstore 3.3% 是更脏的真实仓库)。
+
+**B/C 臂状态:阻塞于 DeepSeek 余额(402 Insufficient Balance,已单独验证)**。
+充值后一条命令补齐:`python eval/run_juliet.py all`(chroma 并发初始化竞态已修:惰性单例+锁)。
+
+**白捡的发现——静态盲区规模化测量**(此前仅有 dkvstore 注入缺陷的轶事证据):
+| CWE | 用例文件 | 缺陷区告警 | 静态捕获率 |
+|---|---|---|---|
+| 476 空指针 | 160 | 1 | ≈0.6% |
+| 415 双重释放 | 1312 | 14 | ≈1% |
+| 369 除零 | 472 | 80 | ≈17% |
+| 401 内存泄漏 | 1482 | 42 | ≈3% |
+clang-analyzer 对 Juliet 构造的空指针/双重释放几乎全盲——"分层责任设计"的前提有了量化依据。
+
+## P5 增量审查基元(2026-08-26)
+
+`cpp_sentinel/incremental.py` + `cpp_sentinel/ci.py`:git diff → 新增行区间 → 基线抑制
+(只审落在新代码上的告警)→ LLM 判定 → step summary。dogfood 工作流见 `docs/dogfood-ci.md`
+(接入 = 配 secret + 放 workflow,3 步)。已在 gr-ieee802-11 真实历史(39ecea2..HEAD,7 文件)验证区间抽取。

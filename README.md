@@ -25,7 +25,7 @@ python -m cpp_sentinel.cli          # 默认扫 /home/hy/dkvstore,报告落在 o
 ## 测试 & eval
 
 ```bash
-python -m pytest tests/ -v          # 16 项确定性单测(不打 LLM)
+python -m pytest tests/ -v          # 确定性单测(不打 LLM,数量以实际统计为准)
 python eval/run_eval.py             # 三臂消融(A/B/C)重跑
 python eval/recompute.py            # 版本对比汇总
 ```
