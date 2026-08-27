@@ -169,7 +169,7 @@ def main():
         print(compute_metrics(gold, ["bug"] * len(LABELS)))
 
     client = None
-    if arm in ("B", "C", "all", "v2", "retr"):
+    if arm in ("B", "C", "all", "v2", "retr", "bi"):
         if not os.environ.get("DEEPSEEK_API_KEY"):
             raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
         client = OpenAI(base_url="https://api.deepseek.com/v1",
@@ -204,6 +204,15 @@ def main():
         print("=== C 臂检索消融: 混合 RRF(向量+BM25) ===")
         rows_hy = run_arm(client, "llm_rag_hybrid", use_rag=True, retriever=Retriever("hybrid"))
         print(compute_metrics(gold, [r["decision"] for r in rows_hy]))
+
+    if arm == "bi":
+        # P7 双语语料:同判定集同 rubric,语料换 cwe_bi;三种检索法各跑一遍
+        from cpp_sentinel.retrieval import Retriever
+        for mode in ("vector", "bm25", "hybrid"):
+            print(f"=== C 臂双语语料: {mode} ===")
+            rows = run_arm(client, f"llm_rag_bi_{mode}", use_rag=True,
+                           retriever=Retriever(mode, collection="cwe_bi"))
+            print(compute_metrics(gold, [r["decision"] for r in rows]))
 
 
 if __name__ == "__main__":

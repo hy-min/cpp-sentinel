@@ -19,11 +19,11 @@ def _tokenize(text: str) -> list[str]:
     return toks
 
 
-def load_corpus():
+def load_corpus(collection: str = "cwe"):
     """从 chroma 读出全量语料(向量检索仍走 chroma,这里只为对齐 id→索引)。"""
     import chromadb
     client = chromadb.PersistentClient(path=CHROMA)
-    col = client.get_collection("cwe")
+    col = client.get_collection(collection)
     got = col.get(include=["documents", "metadatas"])
     rows = [{"id": i, "doc": d, "title": (m or {}).get("title", "")}
             for i, d, m in zip(got["ids"], got["documents"], got["metadatas"])]
@@ -72,10 +72,10 @@ class BM25:
 class Retriever:
     """三种检索法统一接口: query → (top1_title, top1_doc, debug)"""
 
-    def __init__(self, mode: str):
+    def __init__(self, mode: str, collection: str = "cwe"):
         assert mode in ("vector", "bm25", "hybrid")
         self.mode = mode
-        self.client, self.col, self.rows = load_corpus()
+        self.client, self.col, self.rows = load_corpus(collection)
         self.bm25 = BM25([r["doc"] for r in self.rows])
         self.id2idx = {r["id"]: i for i, r in enumerate(self.rows)}
 
