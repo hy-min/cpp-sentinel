@@ -5,6 +5,7 @@
 """
 
 import os
+import time
 from pathlib import Path
 
 # ── R1 铁律:任何 LLM 库 import 之前清代理(与 cli.py 同款)──
@@ -13,8 +14,10 @@ for v in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
     os.environ.pop(v, None)
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from cpp_sentinel import observe
 from cpp_sentinel.cli import run
 from cpp_sentinel.report import make_report
 
@@ -37,5 +40,17 @@ def review(req: ReviewRequest):              # ③ 同步端点,FastAPI 自动�
     if not db.exists():
         raise HTTPException(status_code=400,
                             detail=f"找不到编译数据库 {db} —— 先跑 cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    t0 = time.perf_counter()
     results = run(req.repo, req.limit, req.workers)          # ⑥ 复用课6 的合龙(管线)
-    return make_report(results)                              # ⑦ 报告 dict → 自动 JSON
+    observe.record_review(results, time.perf_counter() - t0)  # ⑦ 观测记账
+    return make_report(results)                              # ⑧ 报告 dict → 自动 JSON
+
+
+@app.get("/healthz")
+def healthz():                                   # 存活探针(k8s/负载均衡用)
+    return {"ok": True}
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics():                                   # Prometheus 抓取端点
+    return observe.render()

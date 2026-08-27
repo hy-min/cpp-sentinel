@@ -220,3 +220,14 @@ Juliet 上 RAG 实为 **NOT CONFIRMED(口径敏感)**;真实仓库的零/负增�
 最差处(安慰剂特征);增益不随检索质量缩放。**RAG 增益 NOT CONFIRMED;知识注入假说被否定
 ——该任务的瓶颈不在外部知识,在判定证据。** RAG 叙事闭环:P4 真实仓库零增益 →
 P6 检索随机(从未真测) → P7 检索修复后仍零增益。
+
+## P8 运行时观测层(2026-08-27)
+
+- `cpp_sentinel/observe.py`: 零依赖指标注册表(计数器+延迟采样),Prometheus 文本格式;
+  API 新增 `GET /metrics` 与 `GET /healthz`。
+- 指标: reviews / alerts_judged / decisions{real|suspicious|ignore|failed} /
+  second_pass / tokens{prompt,completion} / cost_yuan / review_duration 直方图。
+- 测试 +4(注册表/直方图/端点 mock/缺编译库 400 路径),全套 29 passed。
+- 真机冒烟(dkvstore, limit=1): /metrics 实抓全部指标;**观测层端到端耗时 55.3s
+  vs 管线自报判定耗时 11.0s**——差值是 clang-tidy 扫描 + 使用侧索引构建,
+  观测层抓到了管线自报口径看不见的成本(观测口径教训的又一次重演)。
