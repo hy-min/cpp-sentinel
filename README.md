@@ -38,4 +38,4 @@ python eval/recompute.py            # 版本对比汇总
 - LLM 只看告警文本会漏真缺陷(recall 0)→ 关键不是规则,是**跨文件使用侧证据**;
 - clang-tidy/clang/libclang 版本在 22.1.8 与 18.1.1 之间存在差距(GitHub Actions 已如实暴露,
   均为 libclang 18.1.1 绑定,不影响 AST 遍历结果稳定性);
-- RAG(5 条 CWE 小库)在真实仓库增益为 0,在 Juliet 合成库 +2.9pp F1 —— **增益场景依赖,如实报告**(P4)。
+- RAG(5 条 CWE 小库)在真实仓库增益为 0,在 Juliet 合成库 +2.9pp F1;P6 进一步实测:检索层准确率≈随机(跨语言嵌入失效),三种检索法下游无差异——**RAG 结论待双语语料重测,如实报告**(P4/P6)。

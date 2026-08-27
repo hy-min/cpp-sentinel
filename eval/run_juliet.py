@@ -87,21 +87,28 @@ def rag_collection():
     return _CHROMA_COL
 
 
-def rag_context(message: str) -> str:
-    """C 臂:知识库检索相关 CWE 条款(与 v6 同库同法)。"""
-    col = rag_collection()
-    hit = col.query(query_texts=[message], n_results=1)
-    if hit["ids"][0]:
-        return "相关规范: " + hit["metadatas"][0][0]["title"]
-    return ""
+def rag_context(message: str, retriever=None) -> tuple[str, str]:
+    """C 臂:知识库检索相关 CWE 条款。retriever=None 走 v6 同款向量路径(保持基线可比);
+    传入 Retriever 则按其模式(向量/BM25/RRF)检索。返回(上下文本, 检中条目调试信息)。"""
+    if retriever is None:
+        col = rag_collection()
+        hit = col.query(query_texts=[message], n_results=1)
+        if hit["ids"][0]:
+            return "相关规范: " + hit["metadatas"][0][0]["title"], f"vector:top1={hit['ids'][0][0]}"
+        return "", "vector:no-hit"
+    title, _doc, dbg = retriever.query(message)
+    if title:
+        return "相关规范: " + title, dbg
+    return "", dbg
 
 
-def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC) -> dict:
+def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC, retriever=None) -> dict:
     """单条判定:源码证据(±RAG)→ LLM;乱答/异常如实记 unsure,不崩。"""
     alert = f"{row['file']}:{row['line']}: {row['check']}\n{row['message']}"
     ctx = []
+    retrieved = ""
     if use_rag:
-        r = rag_context(row["message"])
+        r, retrieved = rag_context(row["message"], retriever)
         if r:
             ctx.append(r)
     ctx.append("=== 源码证据 ===\n" + source_snippet(row["file"], row["line"]))
@@ -110,17 +117,17 @@ def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC) -> dict:
         text, tries, usage = call_with_retry(client, [{"role": "user", "content": prompt}])
         c = parse_response(text)
         return {**row, "decision": c.decision, "confidence": c.confidence,
-                "reason": c.reason, "usage": usage}
+                "reason": c.reason, "usage": usage, "retrieved": retrieved}
     except Exception as e:
         return {**row, "decision": "unsure", "confidence": -1,
-                "reason": f"{type(e).__name__}: {e}", "usage": {}}
+                "reason": f"{type(e).__name__}: {e}", "usage": {}, "retrieved": retrieved}
 
 
-def run_arm(client, name: str, use_rag: bool, rubric: str = RUBRIC) -> list[dict]:
+def run_arm(client, name: str, use_rag: bool, rubric: str = RUBRIC, retriever=None) -> list[dict]:
     t0 = time.perf_counter()
     out = []
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        futs = {pool.submit(judge_one, client, r, use_rag, rubric): i for i, r in enumerate(LABELS)}
+        futs = {pool.submit(judge_one, client, r, use_rag, rubric, retriever): i for i, r in enumerate(LABELS)}
         for fut in as_completed(futs):
             out.append((futs[fut], fut.result()))
             print(f"  {name}: {len(out)}/{len(LABELS)}", end="\r")
@@ -162,7 +169,7 @@ def main():
         print(compute_metrics(gold, ["bug"] * len(LABELS)))
 
     client = None
-    if arm in ("B", "C", "all", "v2"):
+    if arm in ("B", "C", "all", "v2", "retr"):
         if not os.environ.get("DEEPSEEK_API_KEY"):
             raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
         client = OpenAI(base_url="https://api.deepseek.com/v1",
@@ -187,6 +194,16 @@ def main():
         print("=== C 臂 v2 rubric 对照 ===")
         rows_c2 = run_arm(client, "llm_rag_v2", use_rag=True, rubric=RUBRIC_V2)
         print(compute_metrics(gold, [r["decision"] for r in rows_c2]))
+
+    if arm == "retr":
+        # P6 检索方法消融:同语料同查询同 rubric,只换检索法(向量基线已存 juliet_arm_llm_rag)
+        from cpp_sentinel.retrieval import Retriever
+        print("=== C 臂检索消融: BM25(词面) ===")
+        rows_bm = run_arm(client, "llm_rag_bm25", use_rag=True, retriever=Retriever("bm25"))
+        print(compute_metrics(gold, [r["decision"] for r in rows_bm]))
+        print("=== C 臂检索消融: 混合 RRF(向量+BM25) ===")
+        rows_hy = run_arm(client, "llm_rag_hybrid", use_rag=True, retriever=Retriever("hybrid"))
+        print(compute_metrics(gold, [r["decision"] for r in rows_hy]))
 
 
 if __name__ == "__main__":
