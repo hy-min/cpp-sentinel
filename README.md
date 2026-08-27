@@ -23,6 +23,7 @@ export DEEPSEEK_API_KEY=<你的key>
 
 ```bash
 python -m cpp_sentinel.cli          # 默认扫 /home/hy/dkvstore,报告落在 out/
+uvicorn cpp_sentinel.api:app        # 服务化: POST /api/review;观测: GET /metrics(Prometheus 文本) /healthz
 ```
 
 ## 测试 & eval
