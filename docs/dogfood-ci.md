@@ -147,3 +147,26 @@ jobs:
 
 链路验证项全绿：变更行区间抽取 ✓ 基线抑制（161→4）✓ 使用侧索引构建 ✓
 并发判定 ✓ 二次判定门槛 ✓ token 账单 ✓
+
+---
+
+## 真机 CI 端到端验证（2026-09-02,gr-ieee802-11-HT-Mixed PR #2,GLM glm-5.3-flash)
+
+演示 PR 在 `lib/extract_csi_impl.cc` 种无条件空指针解引用,8 次运行收敛到全链路:
+
+```
+变更文件 1 → 告警 1 → 基线抑制后 1 条入审
+→ GLM 判 real 置信 0.90(带源码证据) → --gate 挂红 ✓
+→ sticky 评论就地更新(同一 comment id,不刷屏) ✓
+```
+
+**失败链(每处修复都已回流本模板)**:YAML 步骤名冒号空格缺引号 → setup-miniconda
+缺 `bash -l`(CONDA_PREFIX 空) → gr-foo 缺 CMAKE_PREFIX_PATH → libboost 无头文件
+(换 libboost-devel) → gnuradio 在 py3.11 下不拖 pybind11 本体(显式装) →
+仓库级 workflow 权限只读(API 改 write) → **PR 上评论查 `pull-requests:write` 而非
+`issues:write`**(GET 能列、POST 403) → **生产链路 build_context 不带源码**
+(评测臂验证过的最关键证据,LLM 看不到代码,无条件空指针也只敢判疑似 0.60;
+补上后同一条告警 real 0.90,且 reasoning token 9519→1372 降 7 倍)。
+
+**最后一个是最重要的产品发现**:dogfood 抓出的不是 CI 配置问题,而是生产证据链
+弱于评测证据链——这正是 dogfood 存在的意义。
