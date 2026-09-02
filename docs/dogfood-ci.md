@@ -27,6 +27,10 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l -eo pipefail {0}   # 关键: login shell 才让 conda activate 生效
+                                          # (否则 CONDA_PREFIX 空、env bin 不在 PATH;实跑踩过)
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -111,6 +115,9 @@ jobs:
 
 ## 已知限制（如实）
 
+- **setup-miniconda 必须配 `shell: bash -l {0}`**:不配 login shell,`activate-environment`
+  在 run 步骤不生效——`CONDA_PREFIX` 为空,cmake 找不到 conda 里的 GnuradioConfig
+  (2026-09-02 实跑连踩两次:先缺 `CMAKE_PREFIX_PATH`,补了仍空才发现是 shell 问题)。
 - **YAML 步骤名含冒号空格必须加引号**(`- name: "PR 评论(sticky: …)"`)——`name:` 的
   纯标量值里 `: ` 是 YAML 语法错误,workflow 会被判 invalid 直接失败(2026-09-02 实跑踩过)。
 - **fork PR 只读**:来自 fork 的 PR,`GITHUB_TOKEN` 默认只读,评论步骤会 403;
