@@ -22,7 +22,9 @@ on:
 
 permissions:
   contents: read
-  issues: write     # PR 评论走 issues API;fork PR 的 GITHUB_TOKEN 只读(见文末限制)
+  issues: write           # issue 评论读写
+  pull-requests: write    # 在 PR 上发评论查的是这个!只有 issues:write 会 GET 能列、POST 403
+                          # ("Resource not accessible by integration",实跑踩过)
 
 jobs:
   review:
