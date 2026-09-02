@@ -91,9 +91,20 @@ def parse_alerts(lines: list[str]) -> list[Alert]:
     return alerts
 
 
+def _source_context(alert: Alert, span: int = 15) -> str:
+    """告警行 ±span 行源码(带行号)—— 评测臂(run_juliet)验证过的最关键证据。
+    生产链路此前居然没带(dogfood 实跑抓出: LLM 看不到代码,无条件空解引用也只敢判疑似)。"""
+    p = Path(alert.file)
+    if not p.exists():
+        return "(源文件不可读)"
+    lines = p.read_text(errors="ignore").splitlines()
+    lo, hi = max(0, alert.line - span - 1), min(len(lines), alert.line + span)
+    return "\n".join(f"{i+1}: {lines[i]}" for i in range(lo, hi))
+
+
 def build_context(alert: Alert, repo: str) -> str:
-    """③④ 背景:调用计数(课2 减化版) + 知识库命中(课3)。"""
-    ctx = []
+    """③④ 背景:告警源码(证据主力) + 调用计数(课2 减化版) + 知识库命中(课3)。"""
+    ctx = ["=== 告警源码 ===\n" + _source_context(alert)]
     # ③ 背景A:库内 TOP 被调函数(用 compile_commands 定位该源文件)
     try:
         import clang.cindex
@@ -124,7 +135,7 @@ def build_context(alert: Alert, repo: str) -> str:
             ctx.append("相关规范: " + hit["metadatas"][0][0]["title"])
     except Exception as e:
         ctx.append(f"(知识库跳过: {e})")
-    return "; ".join(ctx)
+    return "\n\n".join(ctx)
 
 
 def _merge_usage(u1: dict, u2: dict) -> dict:

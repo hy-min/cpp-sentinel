@@ -63,6 +63,11 @@ def main() -> int:
         return 0
 
     results = classify_all(new_alerts, args.repo, limit=len(new_alerts), workers=args.workers)
+    for r in results:                               # 显示层: 报告/评论用仓库相对路径(CI 绝对路径又长又丑)
+        try:
+            r.alert.file = str(Path(r.alert.file).resolve().relative_to(Path(args.repo).resolve()))
+        except ValueError:
+            pass
     report = make_report(results)
     md = to_markdown(report)
     print(md)
