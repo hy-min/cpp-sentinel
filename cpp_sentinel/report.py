@@ -2,13 +2,22 @@ import json
 from dataclasses import dataclass
 from typing import List
 
+from cpp_sentinel.llm import llm_config
 from cpp_sentinel.models import Alert
 from cpp_sentinel.review import Classification
 
 LABEL_CN = {"real": "真问题", "suspicious": "疑似", "ignore": "忽略", "failed": "未能判定"}
 
-# 单价(元/千 tokens)——示例值,以 DeepSeek 官方计费页为准
+# 单价(元/千 tokens)——DeepSeek 口径;以官方计费页为准
 PRICE_PER_1K = {"prompt": 0.002, "completion": 0.008}
+
+
+def cost_cny(prompt_tokens: int, completion_tokens: int) -> float | None:
+    """已知单价的模型返回 ¥ 估计;未知模型(如 GLM)返回 None —— 不打误导性价格。"""
+    if llm_config()[1].startswith("deepseek"):
+        return (prompt_tokens / 1000) * PRICE_PER_1K["prompt"] + \
+               (completion_tokens / 1000) * PRICE_PER_1K["completion"]
+    return None
 
 
 @dataclass
@@ -72,9 +81,12 @@ def to_markdown(report: dict) -> str:
     for f in report["failed"]:
         lines.append(f"- [未能判定] {f['file']}:{f['line']} ({f['check']}) — ⚠ {f['error']}")
     u = report["usage"]
-    cost = (u["prompt_tokens"] / 1000) * PRICE_PER_1K["prompt"] + \
-           (u["completion_tokens"] / 1000) * PRICE_PER_1K["completion"]
-    lines.append(f"\n💰 本次消耗 {u['prompt_tokens']}+{u['completion_tokens']} tokens, 约 ¥{cost:.3f}")
+    cost = cost_cny(u["prompt_tokens"], u["completion_tokens"])
+    if cost is None:
+        lines.append(f"\n💰 本次消耗 {u['prompt_tokens']}+{u['completion_tokens']} tokens"
+                     f"({llm_config()[1]} 计费以模型方账单为准)")
+    else:
+        lines.append(f"\n💰 本次消耗 {u['prompt_tokens']}+{u['completion_tokens']} tokens, 约 ¥{cost:.3f}")
     return "\n".join(lines) + "\n"
 
 

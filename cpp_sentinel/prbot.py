@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cpp_sentinel.report import LABEL_CN, PRICE_PER_1K
+from cpp_sentinel.report import LABEL_CN, cost_cny
 
 MARKER = "<!-- cpp-sentinel-review -->"
 MAX_ENTRIES = 15          # 评论里最多列几条;全量留在 job Summary
@@ -27,8 +27,8 @@ def render_comment(report: dict, gate: bool = False) -> str:
     """报告 dict(make_report 产物)→ PR 评论 markdown(精简版,全量见 job Summary)。"""
     s = report["summary"]
     u = report["usage"]
-    cost = (u["prompt_tokens"] / 1000) * PRICE_PER_1K["prompt"] + \
-           (u["completion_tokens"] / 1000) * PRICE_PER_1K["completion"]
+    cost = cost_cny(u["prompt_tokens"], u["completion_tokens"])
+    cost_note = f"约 ¥{cost:.3f}" if cost is not None else "计费以模型方账单为准"
     lines = [
         MARKER,
         "## 🤖 cpp-sentinel 增量审查\n",
@@ -44,8 +44,7 @@ def render_comment(report: dict, gate: bool = False) -> str:
         lines.append(f"- ……其余 {len(entries) - MAX_ENTRIES} 条见 job Summary")
     for f in report["failed"][:3]:                    # 失败如实挂账,但最多 3 条
         lines.append(f"- [未能判定] `{f['file']}:{f['line']}` ({f['check']}) — ⚠ {f['error']}")
-    lines.append(f"\n💰 本次消耗 {u['prompt_tokens']}+{u['completion_tokens']} tokens,"
-                 f" 约 ¥{cost:.3f}")
+    lines.append(f"\n💰 本次消耗 {u['prompt_tokens']}+{u['completion_tokens']} tokens, {cost_note}")
     if gate:
         lines.append("\n🚪 门控模式: real 且置信度 ≥0.8 的告警会使本检查变红")
     return ("\n".join(lines) + "\n")[:MAX_BODY]

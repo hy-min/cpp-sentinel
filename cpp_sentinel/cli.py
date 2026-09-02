@@ -21,6 +21,7 @@ import openai                          # 异常类用 openai.XXX 前缀引用(�
 from openai import OpenAI
 
 from cpp_sentinel.callers import build_call_index, names_defined_in
+from cpp_sentinel.llm import llm_config                       # provider 可换(DeepSeek/GLM/…)
 from cpp_sentinel.models import Alert
 from cpp_sentinel.parser import parse_alert                 # ★ 漏了这台"剪刀"(课1)
 from cpp_sentinel.review import Classification, build_prompt, parse_response
@@ -40,7 +41,7 @@ def call_with_retry(client, messages: list, max_tries: int = 2,
     for attempt in range(1, max_tries + 1):
         try:
             resp = client.chat.completions.create(
-                model="deepseek-chat", messages=messages, temperature=0)
+                model=llm_config()[1], messages=messages, temperature=0)
             # ✅ 成功:带着用了几次 + 账单一起回去(usage 是 API 明账,不自己数)
             return (resp.choices[0].message.content, attempt,
                     {"prompt_tokens": resp.usage.prompt_tokens,
@@ -169,11 +170,11 @@ def judge_one(client, alert: Alert, repo: str, index: dict[str, list[str]]) -> R
 
 
 def classify_all(alerts: list[Alert], repo: str, limit: int = 3, workers: int = 4) -> list[ReviewResult]:
-    """⑤ LLM 判断:并发(workers 个"打饭窗口")补背景、交 DeepSeek,按原顺序回填。"""
-    if not os.environ.get("DEEPSEEK_API_KEY"):
-        raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
-    client = OpenAI(base_url="https://api.deepseek.com/v1",
-                    api_key=os.environ["DEEPSEEK_API_KEY"])
+    """⑤ LLM 判断:并发(workers 个"打饭窗口")补背景、交 LLM,按原顺序回填。"""
+    base_url, _model, api_key = llm_config()
+    if not api_key:
+        raise SystemExit("请先设置: export CPP_SENTINEL_API_KEY=<你的key>(或 DEEPSEEK_API_KEY)")
+    client = OpenAI(base_url=base_url, api_key=api_key)
 
     t0 = time.perf_counter()                            # ② 计时器(秒表,比 time.time 更准)
     index = build_call_index(repo)                      # 只用一次:全库"谁在调用"索引(共享只读)

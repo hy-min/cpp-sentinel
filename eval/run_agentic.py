@@ -128,10 +128,11 @@ def main():
     print(f"判定集 {len(rows)} 条(bug {bugs}/noise {len(rows) - bugs})")
     baseline_for(rows)
 
-    if not os.environ.get("DEEPSEEK_API_KEY"):
-        raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
-    client = OpenAI(base_url="https://api.deepseek.com/v1",
-                    api_key=os.environ["DEEPSEEK_API_KEY"])
+    from cpp_sentinel.llm import llm_config
+    base_url, _model, api_key = llm_config()
+    if not api_key:
+        raise SystemExit("请先设置: export CPP_SENTINEL_API_KEY=<你的key>(或 DEEPSEEK_API_KEY)")
+    client = OpenAI(base_url=base_url, api_key=api_key)
 
     if args.arm in ("T", "all"):
         from cpp_sentinel.retrieval import Retriever

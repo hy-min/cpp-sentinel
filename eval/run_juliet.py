@@ -170,10 +170,11 @@ def main():
 
     client = None
     if arm in ("B", "C", "all", "v2", "retr", "bi"):
-        if not os.environ.get("DEEPSEEK_API_KEY"):
-            raise SystemExit("请先设置: export DEEPSEEK_API_KEY=<你的key>")
-        client = OpenAI(base_url="https://api.deepseek.com/v1",
-                        api_key=os.environ["DEEPSEEK_API_KEY"])
+        from cpp_sentinel.llm import llm_config
+        base_url, _model, api_key = llm_config()
+        if not api_key:
+            raise SystemExit("请先设置: export CPP_SENTINEL_API_KEY=<你的key>(或 DEEPSEEK_API_KEY)")
+        client = OpenAI(base_url=base_url, api_key=api_key)
 
     if arm in ("B", "all"):
         print("=== B 臂: +LLM(源码证据) ===")
