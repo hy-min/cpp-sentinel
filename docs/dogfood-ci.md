@@ -63,7 +63,7 @@ jobs:
           python -m cpp_sentinel.ci --repo . --base "$BASE" --dots "$DOTS" --workers 8 \
             --out-md /tmp/review.md
 
-      - name: PR 评论(sticky: 同一条评论持续更新;gate 挂红时也照常评论)
+      - name: "PR 评论(sticky: 同一条评论持续更新;gate 挂红时也照常评论)"
         if: github.event_name == 'pull_request' && always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,6 +110,8 @@ jobs:
 
 ## 已知限制（如实）
 
+- **YAML 步骤名含冒号空格必须加引号**(`- name: "PR 评论(sticky: …)"`)——`name:` 的
+  纯标量值里 `: ` 是 YAML 语法错误,workflow 会被判 invalid 直接失败(2026-09-02 实跑踩过)。
 - **fork PR 只读**:来自 fork 的 PR,`GITHUB_TOKEN` 默认只读,评论步骤会 403;
   dogfood 场景(自己仓库)不受影响。要支持 fork PR 需 `pull_request_target` + checkout 隔离,暂不做。
 - gr-ieee802-11 的 cmake configure 在纯净 CI 环境的完整依赖链（gnuradio/uhd/gr-foo 之外）
