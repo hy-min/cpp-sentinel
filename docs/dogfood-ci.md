@@ -41,7 +41,8 @@ jobs:
           python-version: "3.11"
 
       - name: 装 clang-tools 与 GNU Radio(cmake configure 需要头文件)
-        run: conda install -n cpp-review clang-tools=22.1.8 clang=22.1.8 clangxx=22.1.8 gnuradio uhd -c conda-forge -y
+        run: conda install -n cpp-review clang-tools=22.1.8 clang=22.1.8 clangxx=22.1.8 gnuradio uhd libboost -c conda-forge -y
+        # libboost 不能省: gnuradio 的运行时依赖不带头文件,gr-foo 的 FindBoost 要 Boost_INCLUDE_DIR
 
       - name: 装 gr-foo(gr-ieee802-11 上游依赖)
         run: |
