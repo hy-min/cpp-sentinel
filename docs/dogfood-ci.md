@@ -7,7 +7,7 @@ LLM 判定后写进 job summary + **sticky PR 评论**（同一条评论持续�
 
 ## 一键接入（3 步）
 
-1. 在 gr-ieee802-11 仓库 **Settings → Secrets and variables → Actions** 新建 `DEEPSEEK_API_KEY`。
+1. 在 gr-ieee802-11 仓库 **Settings → Secrets and variables → Actions** 新建 `CPP_SENTINEL_API_KEY`（或 `DEEPSEEK_API_KEY`）。
 2. 把下面的 YAML 存为 gr-ieee802-11 的 `.github/workflows/cpp-sentinel.yml`，推送。
 3. 下一个含 C++ 变更的 PR 即触发；结果在 PR 评论区（同一条评论持续更新）+ job Summary 页。
 
@@ -61,7 +61,9 @@ jobs:
 
       - name: 增量审查(建议模式;加 --gate 则高置信 real 挂 PR)
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          CPP_SENTINEL_API_KEY: ${{ secrets.CPP_SENTINEL_API_KEY }}   # 或 DEEPSEEK_API_KEY(回落兼容)
+          # 切任意 OpenAI 兼容端点: CPP_SENTINEL_BASE_URL + CPP_SENTINEL_MODEL(如 GLM:
+          # https://open.bigmodel.cn/api/paas/v4/ + glm-5.3-flash,已实跑验证)
           PYTHONPATH: /tmp/cpp-sentinel
         run: |
           pip install -r /tmp/cpp-sentinel/requirements.txt
