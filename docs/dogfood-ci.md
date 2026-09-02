@@ -42,7 +42,8 @@ jobs:
       - name: 装 gr-foo(gr-ieee802-11 上游依赖)
         run: |
           git clone --depth 1 https://github.com/bastibl/gr-foo /tmp/gr-foo
-          cmake -S /tmp/gr-foo -B /tmp/gr-foo/build -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX"
+          # 两个 PREFIX 都要: INSTALL_PREFIX 定装哪,PREFIX_PATH 让 find_package 找到 conda 里的 Gnuradio
+          cmake -S /tmp/gr-foo -B /tmp/gr-foo/build -DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX" -DCMAKE_PREFIX_PATH="$CONDA_PREFIX"
           cmake --build /tmp/gr-foo/build -j"$(nproc)"
           cmake --install /tmp/gr-foo/build
 
@@ -114,8 +115,9 @@ jobs:
   纯标量值里 `: ` 是 YAML 语法错误,workflow 会被判 invalid 直接失败(2026-09-02 实跑踩过)。
 - **fork PR 只读**:来自 fork 的 PR,`GITHUB_TOKEN` 默认只读,评论步骤会 403;
   dogfood 场景(自己仓库)不受影响。要支持 fork PR 需 `pull_request_target` + checkout 隔离,暂不做。
-- gr-ieee802-11 的 cmake configure 在纯净 CI 环境的完整依赖链（gnuradio/uhd/gr-foo 之外）
-  未经实跑；首次触发若 configure 失败，按报错补缺即可，ci 驱动逻辑本身已本地验证。
+- gr-ieee802-11 纯净 CI 依赖链实跑中(2026-09-02 起):已修 YAML 步骤名引号、
+  gr-foo configure 缺 `CMAKE_PREFIX_PATH`(找不到 conda 的 GnuradioConfig)两处;
+  若后续 configure 仍缺依赖,按报错补缺即可,ci 驱动逻辑本身已本地验证。
 
 ---
 
