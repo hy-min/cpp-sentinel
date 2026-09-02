@@ -43,6 +43,8 @@ def main() -> int:
     ap.add_argument("--gate", action="store_true", help="高置信 real 时退出码 1")
     ap.add_argument("--out-md", default="",
                     help="PR 评论载荷落盘路径(含 sticky 标记,供 prbot 步骤读取)")
+    ap.add_argument("--memory", default="",
+                    help="反馈记忆 jsonl 路径(人工复核历史 → few-shot 注入,P12)")
     ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
 
@@ -62,7 +64,13 @@ def main() -> int:
             Path(args.out_md).write_text(render_empty("本次变更未引入新告警。"))
         return 0
 
-    results = classify_all(new_alerts, args.repo, limit=len(new_alerts), workers=args.workers)
+    store = None
+    if args.memory:                                     # P12: 反馈记忆(可选)
+        from cpp_sentinel.memory import MemoryStore
+        store = MemoryStore(args.memory)
+        print(f"      反馈记忆 {len(store.entries)} 条")
+    results = classify_all(new_alerts, args.repo, limit=len(new_alerts),
+                           workers=args.workers, memory=store)
     for r in results:                               # 显示层: 报告/评论用仓库相对路径(CI 绝对路径又长又丑)
         try:
             r.alert.file = str(Path(r.alert.file).resolve().relative_to(Path(args.repo).resolve()))

@@ -23,7 +23,7 @@ import openai
 
 from cpp_sentinel.callers import names_defined_in
 from cpp_sentinel.cli import RETRYABLE                    # 重试策略单源(课14)
-from cpp_sentinel.llm import llm_config                   # provider 可换(DeepSeek/GLM/…)
+from cpp_sentinel.llm import llm_config, reasoning_effort  # provider 可换(DeepSeek/GLM/…)
 from cpp_sentinel.review import parse_response
 
 MAX_TOOL_CHARS = 4000         # 单条工具结果上限: 防爆 prompt,也逼 LLM 用 span 精准取证
@@ -51,6 +51,8 @@ def _chat(client, messages: list, tools: list | None = None,
     for attempt in range(1, max_tries + 1):
         try:
             kw = {"model": llm_config()[1], "messages": messages, "temperature": 0}
+            if effort := reasoning_effort():                # GLM-5 系: low/high/max
+                kw["extra_body"] = {"reasoning_effort": effort}
             if tools:
                 kw["tools"] = tools
             resp = client.chat.completions.create(**kw)

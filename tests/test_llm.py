@@ -36,6 +36,25 @@ def test_call_with_retry_uses_env_model(monkeypatch):
     assert client.chat.completions.create.call_args.kwargs["model"] == "glm-5.3-flash"
 
 
+def test_reasoning_effort_wiring(monkeypatch):
+    """GLM-5 系始终思考: reasoning_effort=low 经 extra_body 透传(2s vs 14s 实测);
+    未设置时不传该参数(DeepSeek 等端点的安全默认)。"""
+    client = MagicMock()
+    resp = MagicMock()
+    resp.choices = [MagicMock(message=MagicMock(content="ok"))]
+    resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    client.chat.completions.create.return_value = resp
+
+    monkeypatch.setenv("CPP_SENTINEL_REASONING_EFFORT", "low")
+    call_with_retry(client, [{"role": "user", "content": "hi"}])
+    assert client.chat.completions.create.call_args.kwargs["extra_body"] == \
+        {"reasoning_effort": "low"}
+
+    monkeypatch.delenv("CPP_SENTINEL_REASONING_EFFORT")
+    call_with_retry(client, [{"role": "user", "content": "hi"}])
+    assert "extra_body" not in client.chat.completions.create.call_args.kwargs
+
+
 def test_cost_only_priced_for_known_models(monkeypatch):
     """DeepSeek → ¥ 估计;未知模型(如 GLM)→ None,不打误导性价格(诚实挂账)。"""
     monkeypatch.setenv("CPP_SENTINEL_MODEL", "deepseek-chat")

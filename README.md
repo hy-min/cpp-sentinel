@@ -17,7 +17,8 @@ CONFIRMED);小仓库消融(dkvstore)定位召回钥匙 = 跨文件使用侧证�
 ```bash
 conda create -n cpp-review python=3.11 clang-tools=22.1.8 clang=22.1.8 clangxx=22.1.8 -c conda-forge -y
 pip install -r requirements.txt
-export DEEPSEEK_API_KEY=<你的key>
+export CPP_SENTINEL_API_KEY=<你的key>   # 任意 OpenAI 兼容端点;DEEPSEEK_API_KEY 回落兼容
+# 非 DeepSeek 时: export CPP_SENTINEL_BASE_URL=... CPP_SENTINEL_MODEL=...
 ```
 
 ## 快速开始(一条命令端到端)
@@ -45,8 +46,11 @@ python eval/recompute.py            # 版本对比汇总
 - RAG:真实仓库零增益(P4);P6 实测检索层准确率≈随机(跨语言嵌入失效);P7 双语语料把检准率修到 4 倍后下游 F1 依然零增益——**该任务知识注入边际≈0,瓶颈在判定证据不在检索**(P4/P6/P7 完整链条)。
 - Agentic(P10):工具调用让 LLM 自主取证,召回 0.72→0.81 但精度 −3.5pp、token 5×——**精度-召回平移而非净收益,NOT CONFIRMED**;KB 在 LLM 自主检索下仍零增益(第四次复验)。
 - check 族路由(P11):数据流 check(bugprone-unchecked-*/realloc)走 agentic、其余走单判——F1 **0.853**(超此前全部臂)、token 仅 1.45×,**CONFIRMED**;oracle 天花板 0.857,语义规则拿下 99.5%;KB 第五次零增益(路由 T-lite ≈ T 且更便宜)。
+- 反馈记忆(P12):人工复核历史做 few-shot 注入,F1 ±1.4pp 方向不定、token +13%——**NOT CONFIRMED**;注入侧手段第六次不动下游指标。头条精度 0.89 换 GLM 复跑逐位一致(0.888),跨模型稳健。
+- LLM provider 可换:`CPP_SENTINEL_{API_KEY,BASE_URL,MODEL}` 切任意 OpenAI 兼容端点(GLM 已实跑);GLM-5 系强制思考,`CPP_SENTINEL_REASONING_EFFORT=low` 提速 7 倍。
 
 ```bash
 python eval/run_agentic.py --arm all    # P10 消融重跑(支持断点续跑)
 python eval/route_p11.py                # P11 路由分析(零 LLM 成本,确定性复算)
+python eval/run_memory.py --arm all     # P12 记忆消融(需 CPP_SENTINEL_* 或 DEEPSEEK_API_KEY)
 ```

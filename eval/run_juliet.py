@@ -102,8 +102,9 @@ def rag_context(message: str, retriever=None) -> tuple[str, str]:
     return "", dbg
 
 
-def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC, retriever=None) -> dict:
-    """单条判定:源码证据(±RAG)→ LLM;乱答/异常如实记 unsure,不崩。"""
+def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC, retriever=None,
+              extra_ctx: str = "") -> dict:
+    """单条判定:源码证据(±RAG ±额外上下文如反馈记忆)→ LLM;乱答/异常如实记 unsure,不崩。"""
     alert = f"{row['file']}:{row['line']}: {row['check']}\n{row['message']}"
     ctx = []
     retrieved = ""
@@ -112,6 +113,8 @@ def judge_one(client, row: dict, use_rag: bool, rubric: str = RUBRIC, retriever=
         if r:
             ctx.append(r)
     ctx.append("=== 源码证据 ===\n" + source_snippet(row["file"], row["line"]))
+    if extra_ctx:
+        ctx.append(extra_ctx)                           # P12: 历史人工复核 few-shot
     prompt = f"{rubric}\n\n=== 告警 ===\n{alert}\n=== 背景 ===\n" + "\n".join(ctx)
     try:
         text, tries, usage = call_with_retry(client, [{"role": "user", "content": prompt}])

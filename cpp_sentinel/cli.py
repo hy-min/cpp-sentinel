@@ -21,7 +21,7 @@ import openai                          # 异常类用 openai.XXX 前缀引用(�
 from openai import OpenAI
 
 from cpp_sentinel.callers import build_call_index, names_defined_in
-from cpp_sentinel.llm import llm_config                       # provider 可换(DeepSeek/GLM/…)
+from cpp_sentinel.llm import llm_config, reasoning_effort   # provider 可换(DeepSeek/GLM/…)
 from cpp_sentinel.models import Alert
 from cpp_sentinel.parser import parse_alert                 # ★ 漏了这台"剪刀"(课1)
 from cpp_sentinel.review import Classification, build_prompt, parse_response
@@ -40,8 +40,10 @@ def call_with_retry(client, messages: list, max_tries: int = 2,
     last_err = None
     for attempt in range(1, max_tries + 1):
         try:
-            resp = client.chat.completions.create(
-                model=llm_config()[1], messages=messages, temperature=0)
+            kw = {"model": llm_config()[1], "messages": messages, "temperature": 0}
+            if effort := reasoning_effort():                # GLM-5 系: low/high/max
+                kw["extra_body"] = {"reasoning_effort": effort}
+            resp = client.chat.completions.create(**kw)
             # ✅ 成功:带着用了几次 + 账单一起回去(usage 是 API 明账,不自己数)
             return (resp.choices[0].message.content, attempt,
                     {"prompt_tokens": resp.usage.prompt_tokens,
@@ -157,10 +159,18 @@ def gather_evidence(alert: Alert, repo: str, index: dict[str, list[str]]) -> lis
     return evidence[:6]                                 # 最多 6 条,撑爆 prompt 就是灾难
 
 
-def judge_one(client, alert: Alert, repo: str, index: dict[str, list[str]]) -> ReviewResult:
-    """单条判定:低置信度 → 带使用侧证据自动重判一次(最多一次,防死循环)。"""
+def judge_one(client, alert: Alert, repo: str, index: dict[str, list[str]],
+              memory=None) -> ReviewResult:
+    """单条判定:低置信度 → 带使用侧证据自动重判一次(最多一次,防死循环)。
+    memory: 可选 MemoryStore —— 命中历史复核时注入 few-shot(P12)。"""
     try:
         context = build_context(alert, repo)
+        if memory:
+            hint = memory.render(memory.similar(
+                alert.check_name, alert.message,
+                exclude_key=(alert.file, alert.line, alert.check_name)))
+            if hint:
+                context += "\n\n" + hint
         msg = [{"role": "user", "content": build_prompt(alert, context)}]
         text, _, usage = call_with_retry(client, msg)
         first = parse_response(text)
@@ -180,7 +190,8 @@ def judge_one(client, alert: Alert, repo: str, index: dict[str, list[str]]) -> R
         return ReviewResult(alert=alert, error=f"{type(e).__name__}: {e}")
 
 
-def classify_all(alerts: list[Alert], repo: str, limit: int = 3, workers: int = 4) -> list[ReviewResult]:
+def classify_all(alerts: list[Alert], repo: str, limit: int = 3, workers: int = 4,
+                 memory=None) -> list[ReviewResult]:
     """⑤ LLM 判断:并发(workers 个"打饭窗口")补背景、交 LLM,按原顺序回填。"""
     base_url, _model, api_key = llm_config()
     if not api_key:
@@ -192,7 +203,7 @@ def classify_all(alerts: list[Alert], repo: str, limit: int = 3, workers: int = 
     print(f"      使用侧索引 {len(index)} 个函数")
     results = []
     with ThreadPoolExecutor(max_workers=workers) as pool:        # ③ 开 workers 个窗口
-        futures = {pool.submit(judge_one, client, a, repo, index): i
+        futures = {pool.submit(judge_one, client, a, repo, index, memory): i
                    for i, a in enumerate(alerts[:limit])}
         for fut in as_completed(futures):               # ④ 挤到窗口的饭菜先上桌
             results.append((futures[fut], fut.result()))  # ⑤ (原来的第几号, 结果) 放一起

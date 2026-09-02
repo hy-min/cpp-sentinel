@@ -19,3 +19,10 @@ def llm_config() -> tuple[str, str, str]:
         os.environ.get("CPP_SENTINEL_MODEL", DEFAULT_MODEL),
         os.environ.get("CPP_SENTINEL_API_KEY") or os.environ.get("DEEPSEEK_API_KEY", ""),
     )
+
+
+def reasoning_effort() -> str | None:
+    """CPP_SENTINEL_REASONING_EFFORT: GLM-5 系始终思考,可调 low/high/max。
+    low 实测 2s/36 tokens vs 默认 14s/539 tokens(判断类任务够用,成本降 15 倍)。
+    None = 不传该参数(DeepSeek 等不支持端点的安全默认)。"""
+    return os.environ.get("CPP_SENTINEL_REASONING_EFFORT") or None
