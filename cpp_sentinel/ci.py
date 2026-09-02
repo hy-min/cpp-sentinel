@@ -18,6 +18,7 @@ for v in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
 
 from cpp_sentinel.cli import classify_all, parse_alerts         # 复用并发判定/去重
 from cpp_sentinel.incremental import changed_lines, filter_to_changed
+from cpp_sentinel.prbot import render_comment, render_empty     # PR 评论载荷(带 sticky 标记)
 from cpp_sentinel.report import make_report, to_markdown
 
 TIDY_ARGS = ["--checks=bugprone-*,performance-*,clang-analyzer-*"]
@@ -40,12 +41,16 @@ def main() -> int:
     ap.add_argument("--base", required=True, help="PR: base.sha;push: event.before")
     ap.add_argument("--dots", type=int, default=3, choices=[2, 3])
     ap.add_argument("--gate", action="store_true", help="高置信 real 时退出码 1")
+    ap.add_argument("--out-md", default="",
+                    help="PR 评论载荷落盘路径(含 sticky 标记,供 prbot 步骤读取)")
     ap.add_argument("--workers", type=int, default=8)
     args = ap.parse_args()
 
     changed = changed_lines(args.repo, args.base, dots=args.dots)
     if not changed:
         print("无 C++ 变更,跳过审查。")
+        if args.out_md:                             # 干净 PR 也要有评论(bot 存在感的证据)
+            Path(args.out_md).write_text(render_empty("本次变更不涉及 C++ 代码。"))
         return 0
     files = [str(Path(args.repo) / rel) for rel in changed]
     alerts = parse_alerts(scan_files(args.repo, files))
@@ -53,12 +58,16 @@ def main() -> int:
     print(f"变更文件 {len(files)} → 静态告警 {len(alerts)} → 基线抑制后 {len(new_alerts)} 条入审")
     if not new_alerts:
         print("变更未引入新告警。")
+        if args.out_md:
+            Path(args.out_md).write_text(render_empty("本次变更未引入新告警。"))
         return 0
 
     results = classify_all(new_alerts, args.repo, limit=len(new_alerts), workers=args.workers)
     report = make_report(results)
     md = to_markdown(report)
     print(md)
+    if args.out_md:                                 # 评论载荷: 精简版,须在 gate 退出前落盘
+        Path(args.out_md).write_text(render_comment(report, gate=args.gate))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:                                     # CI 里顺手写进 job 页面
         with open(summary, "a") as fh:

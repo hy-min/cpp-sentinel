@@ -2,13 +2,14 @@
 
 目标：cpp-sentinel 的第一个真实用户 = 我们自己的旗舰仓库（986 commits 的 gr-ieee802-11）。
 语义：**PR/push 增量审查**——只审变更文件、只报落在新代码上的告警（基线抑制），
-LLM 判定后写进 job summary；默认建议模式（不挂 PR），`--gate` 可切门控模式。
+LLM 判定后写进 job summary + **sticky PR 评论**（同一条评论持续更新，不刷屏）；
+默认建议模式（不挂 PR），`--gate` 可切门控模式。
 
 ## 一键接入（3 步）
 
 1. 在 gr-ieee802-11 仓库 **Settings → Secrets and variables → Actions** 新建 `DEEPSEEK_API_KEY`。
 2. 把下面的 YAML 存为 gr-ieee802-11 的 `.github/workflows/cpp-sentinel.yml`，推送。
-3. 下一个含 C++ 变更的 PR/push 即触发；结果在该 workflow run 的 Summary 页。
+3. 下一个含 C++ 变更的 PR 即触发；结果在 PR 评论区（同一条评论持续更新）+ job Summary 页。
 
 ```yaml
 name: cpp-sentinel 增量审查
@@ -21,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  issues: write     # PR 评论走 issues API;fork PR 的 GITHUB_TOKEN 只读(见文末限制)
 
 jobs:
   review:
@@ -58,8 +60,38 @@ jobs:
           pip install -r /tmp/cpp-sentinel/requirements.txt
           BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
           DOTS=3; [ "${{ github.event_name }}" = "push" ] && DOTS=2
-          python -m cpp_sentinel.ci --repo . --base "$BASE" --dots "$DOTS" --workers 8
+          python -m cpp_sentinel.ci --repo . --base "$BASE" --dots "$DOTS" --workers 8 \
+            --out-md /tmp/review.md
+
+      - name: PR 评论(sticky: 同一条评论持续更新;gate 挂红时也照常评论)
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYTHONPATH: /tmp/cpp-sentinel
+        run: |
+          if [ -f /tmp/review.md ]; then
+            python -m cpp_sentinel.prbot --repo ${{ github.repository }} \
+              --pr ${{ github.event.pull_request.number }} --body-file /tmp/review.md
+          fi
 ```
+
+## 轻量变体：小仓库(kvstore / Makefile 项目)
+
+无需 gnuradio 的小仓库,装 bear 拦截 Makefile 构建生成编译数据库即可:
+
+```yaml
+      - name: 装 clang-tools 与 bear
+        run: conda install -n cpp-review clang-tools=22.1.8 clang=22.1.8 clangxx=22.1.8 bear -c conda-forge -y
+
+      - name: 生成编译数据库(bear 拦截真实构建)
+        run: |
+          make clean || true          # 仓库若提交过 .o,必须先清,否则 bear 拦不到编译命令
+          bear -- make -j"$(nproc)"
+```
+
+其余步骤(取 cpp-sentinel / 增量审查 / PR 评论)与上完全相同。
+**纯 C 仓库注意**:`build_call_index` 只索引 .cc/.cpp,纯 C 仓库使用侧证据为空,
+低置信二次判定退化为维持原判——功能正常但少了证据层(如实标注,后续可扩 .c)。
 
 ## 设计要点（面试口径）
 
@@ -68,13 +100,18 @@ jobs:
   已在真实仓库验证（gr-ieee802-11 `39ecea2..HEAD`：7 个变更文件，区间抽取正确）。
 - **PR/push 双触发**：PR 用三点 diff（对 merge-base），push 用两点 diff（对推送前 SHA）；
   单人直推工作流也有审查覆盖。
+- **sticky PR 评论**(`prbot.py`)：评论体埋 `<!-- cpp-sentinel-review -->` 标记，
+  重复推送 PATCH 更新同一条——不刷屏;认证用 runner 预装的 `gh` + `GITHUB_TOKEN`,
+  零额外凭证;`if: always()` 保证 gate 挂红时评论照样更新。
 - **编译数据库只要 configure**：`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` 不构建，
   CI 时间大头是 conda 依赖（gnuradio/uhd），可后续用缓存优化。
 - **建议模式默认**：结果写 `GITHUB_STEP_SUMMARY`，不拦 PR；`--gate` 时
   real 且置信 ≥0.8 才退出码 1——与"置信度门槛"设计同源。
 
-## 已知待验证项（如实）
+## 已知限制（如实）
 
+- **fork PR 只读**:来自 fork 的 PR,`GITHUB_TOKEN` 默认只读,评论步骤会 403;
+  dogfood 场景(自己仓库)不受影响。要支持 fork PR 需 `pull_request_target` + checkout 隔离,暂不做。
 - gr-ieee802-11 的 cmake configure 在纯净 CI 环境的完整依赖链（gnuradio/uhd/gr-foo 之外）
   未经实跑；首次触发若 configure 失败，按报错补缺即可，ci 驱动逻辑本身已本地验证。
 
